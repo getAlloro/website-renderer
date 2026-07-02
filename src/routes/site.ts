@@ -1,10 +1,17 @@
 import { Request, Response } from 'express';
-import { getProjectByHostname, getProjectByCustomDomain } from '../services/project.service';
+import {
+  getProjectByHostname,
+  getProjectByCustomDomain,
+  getArchivedProjectByHostname,
+  getArchivedProjectByCustomDomain,
+} from '../services/project.service';
 import { getPageToRender, hasPublishedPages, getArtifactPageByPrefix } from '../services/page.service';
 import { fetchArtifactIndexHtml, fetchArtifactAsset } from '../services/artifact.service';
 import { getSinglePostData } from '../services/singlepost.service';
+import { buildSitemapXml, buildRobotsTxt, primaryPublicHost } from '../services/sitemap.service';
 import { siteNotFoundPage } from '../templates/site-not-found';
 import { siteNotReadyPage } from '../templates/site-not-ready';
+import { siteArchivedPage } from '../templates/site-archived';
 import { pageNotFoundPage } from '../templates/page-not-found';
 import { successPage } from '../templates/success-page';
 import { renderPage, normalizeSections, injectSeoMeta } from '../utils/renderer';
@@ -118,7 +125,7 @@ async function getIntegrationScripts(projectId: string, html: string): Promise<s
   }
 }
 
-async function assembleHtml(project: Project, page: Page): Promise<string> {
+async function assembleHtml(project: Project, page: Page, servingHost: string): Promise<string> {
   const db = getDb();
 
   // Fetch template snippets (if project has template)
@@ -156,11 +163,11 @@ async function assembleHtml(project: Project, page: Page): Promise<string> {
   // Resolve {{ menu id='slug' }} shortcodes
   html = await resolveMenus(html, project.id, project.template_id || undefined);
 
-  // Inject page-level SEO meta tags (replaces or adds to wrapper)
+  // Inject page-level SEO meta tags (replaces or adds to wrapper).
+  // The serving context makes canonical/og:url self-derived and always
+  // present, even when seo_data is null or carries junk values.
   const seoData = page.seo_data as SeoData | null;
-  if (seoData) {
-    html = injectSeoMeta(html, seoData);
-  }
+  html = injectSeoMeta(html, seoData, { host: servingHost, path: page.path });
 
   // Inject integration-managed tracking scripts (Rybbit, Clarity)
   const integrationScripts = await getIntegrationScripts(project.id, html);
@@ -184,7 +191,7 @@ async function assembleHtml(project: Project, page: Page): Promise<string> {
  * Does NOT run Tailwind compilation or inject the form handler script —
  * the React app handles its own CSS and forms.
  */
-async function assembleArtifactHtml(project: Project, page: Page): Promise<string> {
+async function assembleArtifactHtml(project: Project, page: Page, servingHost: string): Promise<string> {
   if (!page.artifact_s3_prefix) {
     throw new Error(`Artifact page ${page.id} has no S3 prefix`);
   }
@@ -195,11 +202,9 @@ async function assembleArtifactHtml(project: Project, page: Page): Promise<strin
   // Only inject SEO meta tags and code snippets into the existing HTML structure.
   let html = await fetchArtifactIndexHtml(page.artifact_s3_prefix);
 
-  // Inject SEO meta tags
+  // Inject SEO meta tags (canonical/og:url self-derived from serving context)
   const seoData = page.seo_data as SeoData | null;
-  if (seoData) {
-    html = injectSeoMeta(html, seoData);
-  }
+  html = injectSeoMeta(html, seoData, { host: servingHost, path: page.path });
 
   // Inject code snippets (tracking scripts, analytics, etc.)
   const templateSnippets = project.template_id
@@ -279,7 +284,8 @@ function formatDateStr(dateStr: string | Date | null): string {
 async function assembleSinglePostHtml(
   project: Project,
   postType: any,
-  post: any
+  post: any,
+  servingHost: string
 ): Promise<string> {
   const db = getDb();
 
@@ -349,11 +355,12 @@ async function assembleSinglePostHtml(
   // Resolve {{ menu id='slug' }} shortcodes
   html = await resolveMenus(html, project.id, project.template_id || undefined);
 
-  // Inject post-level SEO meta tags
+  // Inject post-level SEO meta tags (canonical/og:url self-derived)
   const postSeoData = post.seo_data as SeoData | null;
-  if (postSeoData) {
-    html = injectSeoMeta(html, postSeoData);
-  }
+  html = injectSeoMeta(html, postSeoData, {
+    host: servingHost,
+    path: `/${postType.slug}/${post.slug}`,
+  });
 
   // Inject integration-managed tracking scripts (Rybbit, Clarity)
   const integrationScripts = await getIntegrationScripts(project.id, html);
@@ -370,14 +377,29 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
   const customDomain = res.locals.customDomain as string | undefined;
   const pagePath = req.path === '/' ? '/' : req.path;
 
-  // ?nocache=1 — flush all post-related Redis keys for this request
+  // ?nocache=1 — flush all per-site Redis cache keys for this request.
+  // SCAN + per-key DEL: the production Redis is a cluster with the KEYS
+  // command disabled and CROSSSLOT enforcement on multi-key DEL — the old
+  // keys()+del(...) flush silently threw and did NOTHING (verified
+  // 2026-07-02); every "nocache-verified" change had actually propagated
+  // via TTL expiry alone.
   if (req.query.nocache === '1') {
     try {
       const redis = getRedis();
-      const patterns = ['pb:*', 'posts:*', 'sp:*', 'mt:*', 'menu:*', 'tw:*', 'redir:*', 'rb:*', 'reviews:*'];
+      const patterns = ['pb:*', 'posts:*', 'sp:*', 'mt:*', 'menu:*', 'tw:*', 'redir:*', 'rb:*', 'reviews:*', 'sitemap:*', 'robots:*'];
       for (const pattern of patterns) {
-        const keys = await redis.keys(pattern);
-        if (keys.length > 0) await redis.del(...keys);
+        let cursor = '0';
+        do {
+          const [next, batch] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 500);
+          cursor = next;
+          for (const key of batch) {
+            try {
+              await redis.del(key);
+            } catch {
+              // single-key delete failure is non-fatal
+            }
+          }
+        } while (cursor !== '0');
       }
     } catch {
       // Redis flush failure is non-fatal
@@ -391,11 +413,37 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
       : null;
 
   if (!project) {
+    // A host that WAS a site gets an explicit 410 Gone (deindex signal),
+    // never the soft "not found" — archived projects used to keep serving
+    // full duplicate sites because nothing checked archived_at.
+    const archived = hostname
+      ? await getArchivedProjectByHostname(hostname)
+      : customDomain
+        ? await getArchivedProjectByCustomDomain(customDomain)
+        : null;
+    if (archived) {
+      res.status(410).type('html').send(siteArchivedPage(hostname || customDomain || 'unknown'));
+      return;
+    }
+
     res.status(404).type('html').send(siteNotFoundPage(hostname || customDomain || 'unknown'));
     return;
   }
 
   const businessName = getBusinessName(project);
+  const servingHost = primaryPublicHost(project);
+
+  // robots.txt / sitemap.xml — previously these fell through the unknown-path
+  // fallback and served homepage HTML. Resolved before everything else so a
+  // redirect row or page can never shadow them.
+  if (pagePath === '/robots.txt') {
+    res.type('text/plain').send(await buildRobotsTxt(project));
+    return;
+  }
+  if (pagePath === '/sitemap.xml') {
+    res.type('application/xml').send(await buildSitemapXml(project));
+    return;
+  }
 
   // Gate: render only if published pages exist. Project status is not checked —
   // generation is tracked at the page level via generation_status.
@@ -417,7 +465,7 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
 
   // Artifact page: serve the React app with header/footer/SEO injection
   if (page && page.page_type === 'artifact') {
-    const html = await assembleArtifactHtml(project, page);
+    const html = await assembleArtifactHtml(project, page, servingHost);
     res.type('html').send(html);
     return;
   }
@@ -449,7 +497,7 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
         segments[1]
       );
       if (singlePost) {
-        const html = await assembleSinglePostHtml(project, singlePost.postType, singlePost.post);
+        const html = await assembleSinglePostHtml(project, singlePost.postType, singlePost.post, servingHost);
         res.type('html').send(html);
         return;
       }
@@ -461,20 +509,15 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Try the home page as fallback for non-root paths
-    if (pagePath !== '/') {
-      const homePage = await getPageToRender(project.id, '/');
-      if (homePage) {
-        const html = await assembleHtml(project, homePage);
-        res.type('html').send(html);
-        return;
-      }
-    }
-
+    // Unknown path → real 404. The old behavior rendered the HOMEPAGE with
+    // HTTP 200 here (soft-404), which kept dead URLs alive in Google's index,
+    // hid broken links from Search Console, and masked every legacy-URL
+    // migration gap. Redirect rows (resolved above) remain the correct way
+    // to keep old URLs working.
     res.status(404).type('html').send(pageNotFoundPage(businessName));
     return;
   }
 
-  const html = await assembleHtml(project, page);
+  const html = await assembleHtml(project, page, servingHost);
   res.type('html').send(html);
 }

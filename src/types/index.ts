@@ -49,6 +49,7 @@ export interface Project {
   step_image_analysis: Array<{ s3Url: string; description: string }> | null;
   primary_color: string | null;
   template_id: string | null;
+  archived_at: Date | string | null;
   created_at: Date;
   updated_at: Date;
 }

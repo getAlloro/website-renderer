@@ -320,6 +320,62 @@ function escapeAttr(str: string): string {
     .replace(/>/g, '&gt;');
 }
 
+/** Where a page/post is actually being served — drives canonical/og:url self-derivation. */
+export interface ServingContext {
+  /** The project's primary public host (custom domain, or generated hostname + .sites.getalloro.com). */
+  host: string;
+  /** The entity's real serving path (page path, or /{post_type.slug}/{post.slug}). */
+  path: string;
+}
+
+function normalizeComparablePath(p: string): string {
+  const trimmed = (p || '').trim();
+  if (!trimmed) return '/';
+  const withSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  return withSlash.length > 1 ? withSlash.replace(/\/+$/, '') : withSlash;
+}
+
+function normalizeComparableHost(h: string): string {
+  return (h || '').trim().toLowerCase().replace(/^www\./, '');
+}
+
+/**
+ * The canonical URL this render should declare. The stored seo_data value is
+ * honored verbatim ONLY when it already names this exact page on this site
+ * (www/trailing-slash-insensitive) — preserving each site's established
+ * www/non-www style so already-indexed canonicals don't churn. Anything else
+ * (absent, malformed, wrong host, wrong path — all of which shipped to
+ * production before the 2026-07-02 repairs) is replaced with the
+ * self-referencing URL derived from the actual serving context.
+ */
+function resolveCanonical(stored: unknown, serving: ServingContext): string {
+  const derived = `https://${serving.host}${normalizeComparablePath(serving.path)}`;
+
+  if (typeof stored !== 'string' || !stored.trim()) return derived;
+  const value = stored.trim();
+
+  let storedHost: string | null = null;
+  let storedPath: string;
+  if (value.startsWith('/')) {
+    storedPath = value;
+  } else {
+    try {
+      const url = new URL(value);
+      storedHost = url.hostname;
+      storedPath = url.pathname;
+    } catch {
+      return derived;
+    }
+  }
+
+  const hostOk =
+    storedHost === null ||
+    normalizeComparableHost(storedHost) === normalizeComparableHost(serving.host);
+  const pathOk = normalizeComparablePath(storedPath) === normalizeComparablePath(serving.path);
+
+  return hostOk && pathOk ? value : derived;
+}
+
 /**
  * Inject page-level SEO meta tags into assembled HTML.
  *
@@ -328,12 +384,35 @@ function escapeAttr(str: string): string {
  * - If not → inject before </head>
  * - Never duplicates
  *
- * If seoData is null/empty, returns HTML unchanged (backward compatible).
+ * When a ServingContext is provided, canonical + og:url are ALWAYS emitted —
+ * self-derived from the serving URL when the stored value is absent or junk —
+ * even when seoData itself is null (previously, entities with no seo_data
+ * shipped with no canonical at all, and stored junk was emitted verbatim).
  */
-export function injectSeoMeta(html: string, seoData: SeoData | null): string {
-  if (!seoData) return html;
+export function injectSeoMeta(
+  html: string,
+  seoData: SeoData | null,
+  serving?: ServingContext
+): string {
+  if (!seoData && !serving) return html;
 
   let result = html;
+
+  if (serving) {
+    const canonical = resolveCanonical(seoData?.canonical_url, serving);
+    result = replaceOrInjectLink(
+      result,
+      'rel="canonical"',
+      `<link rel="canonical" href="${escapeAttr(canonical)}">`
+    );
+    result = replaceOrInjectMeta(
+      result,
+      'property="og:url"',
+      `<meta property="og:url" content="${escapeAttr(canonical)}">`
+    );
+  }
+
+  if (!seoData) return result;
 
   // 1. Title tag
   if (seoData.meta_title) {
@@ -355,8 +434,10 @@ export function injectSeoMeta(html: string, seoData: SeoData | null): string {
     );
   }
 
-  // 3. Canonical URL
-  if (seoData.canonical_url) {
+  // 3. Canonical URL — legacy verbatim emit, only for callers with no
+  // ServingContext (all live render paths pass one; the self-derived
+  // canonical above already handled it and must not be overwritten).
+  if (!serving && seoData.canonical_url) {
     result = replaceOrInjectLink(
       result,
       'rel="canonical"',
@@ -415,8 +496,9 @@ export function injectSeoMeta(html: string, seoData: SeoData | null): string {
     );
   }
 
-  // 7. OG URL (matches canonical)
-  if (seoData.canonical_url) {
+  // 7. OG URL (matches canonical) — legacy verbatim emit, only when no
+  // ServingContext (see canonical note above).
+  if (!serving && seoData.canonical_url) {
     result = replaceOrInjectMeta(
       result,
       'property="og:url"',
