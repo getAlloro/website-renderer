@@ -335,45 +335,18 @@ function normalizeComparablePath(p: string): string {
   return withSlash.length > 1 ? withSlash.replace(/\/+$/, '') : withSlash;
 }
 
-function normalizeComparableHost(h: string): string {
-  return (h || '').trim().toLowerCase().replace(/^www\./, '');
-}
-
 /**
- * The canonical URL this render should declare. The stored seo_data value is
- * honored verbatim ONLY when it already names this exact page on this site
- * (www/trailing-slash-insensitive) — preserving each site's established
- * www/non-www style so already-indexed canonicals don't churn. Anything else
- * (absent, malformed, wrong host, wrong path — all of which shipped to
- * production before the 2026-07-02 repairs) is replaced with the
- * self-referencing URL derived from the actual serving context.
+ * The canonical URL this render declares: always the self-referencing absolute
+ * URL on the site's one canonical host (primaryPublicHost) + real serving
+ * path. The stored seo_data.canonical_url is intentionally ignored — it was
+ * the source of every canonical defect (fabricated paths, wrong hosts, and a
+ * relative/absolute format mix left by the 2026-07-02 data repairs). Deriving
+ * it here makes canonical/og:url uniform site-wide and consistent with the
+ * host-unification redirect, the sitemap, and robots (all share
+ * primaryPublicHost).
  */
-function resolveCanonical(stored: unknown, serving: ServingContext): string {
-  const derived = `https://${serving.host}${normalizeComparablePath(serving.path)}`;
-
-  if (typeof stored !== 'string' || !stored.trim()) return derived;
-  const value = stored.trim();
-
-  let storedHost: string | null = null;
-  let storedPath: string;
-  if (value.startsWith('/')) {
-    storedPath = value;
-  } else {
-    try {
-      const url = new URL(value);
-      storedHost = url.hostname;
-      storedPath = url.pathname;
-    } catch {
-      return derived;
-    }
-  }
-
-  const hostOk =
-    storedHost === null ||
-    normalizeComparableHost(storedHost) === normalizeComparableHost(serving.host);
-  const pathOk = normalizeComparablePath(storedPath) === normalizeComparablePath(serving.path);
-
-  return hostOk && pathOk ? value : derived;
+function resolveCanonical(_stored: unknown, serving: ServingContext): string {
+  return `https://${serving.host}${normalizeComparablePath(serving.path)}`;
 }
 
 /**

@@ -433,6 +433,20 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
   const businessName = getBusinessName(project);
   const servingHost = primaryPublicHost(project);
 
+  // Host unification: a custom-domain site answers on BOTH its bare domain and
+  // its www variant with 200, so Google sees duplicate www/non-www copies.
+  // Redirect every custom-domain request onto the one canonical host
+  // (primaryPublicHost — www for sites that have a www alt). Only custom
+  // domains are considered: generated *.sites.getalloro.com hostnames set
+  // res.locals.hostname (not customDomain), so they never redirect. servingHost
+  // is derived from the project's own domain fields, so it is always a host we
+  // serve, and the `!==` guard makes this a no-op on the canonical host itself
+  // (no loop). Runs before robots/sitemap so those unify onto the same host too.
+  if (customDomain && customDomain !== servingHost) {
+    res.redirect(301, `https://${servingHost}${req.originalUrl}`);
+    return;
+  }
+
   // robots.txt / sitemap.xml — previously these fell through the unknown-path
   // fallback and served homepage HTML. Resolved before everything else so a
   // redirect row or page can never shadow them.

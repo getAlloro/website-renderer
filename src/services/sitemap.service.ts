@@ -15,8 +15,27 @@ import type { Project } from '../types';
 
 const CACHE_TTL = 3600; // 1 hour — content changes surface via ?nocache=1 or TTL
 
+/**
+ * The single canonical host for a site — shared by canonical tags, og:url,
+ * sitemap loc URLs, the robots Sitemap: line, AND the host-unification
+ * redirect. All must agree on ONE host or Google sees www and non-www as
+ * duplicate copies.
+ *
+ * Prefers the www variant when the project actually has it configured
+ * (custom_domain_alt is exactly `www.<custom_domain>`): the established
+ * client sites are indexed on www and their sitemaps were submitted to Search
+ * Console on www, so www is the lowest-churn unification (canonicals don't
+ * move; only the sitemap/robots host aligns to match). Falls back to the bare
+ * custom_domain when there is no www alt, and to the generated hostname for
+ * sites without a custom domain (never www'd).
+ */
 export function primaryPublicHost(project: Project): string {
-  return project.custom_domain || `${project.generated_hostname}.sites.getalloro.com`;
+  if (project.custom_domain) {
+    const wwwVariant = `www.${project.custom_domain}`;
+    if (project.custom_domain_alt === wwwVariant) return wwwVariant;
+    return project.custom_domain;
+  }
+  return `${project.generated_hostname}.sites.getalloro.com`;
 }
 
 function xmlEscape(value: string): string {
