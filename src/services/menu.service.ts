@@ -4,13 +4,15 @@
  * Resolves {{ menu id='slug' }} shortcodes at runtime:
  * 1. Scans HTML for menu shortcodes
  * 2. Fetches menu items from DB (via Redis cache)
- * 3. Builds nested HTML list (or renders through a menu template)
- * 4. Replaces shortcodes with rendered output
+ * 3. Expands post-type autofill placeholders into real entries
+ * 4. Builds nested HTML list (or renders through a menu template)
+ * 5. Replaces shortcodes with rendered output
  */
 
 import { getDb } from '../lib/db';
 import { getRedis } from '../lib/redis';
 import { parseMenuShortcodes, hasMenuShortcodes, escapeHtml } from '../utils/shortcodes';
+import { expandAutofillItems } from './menu-autofill.service';
 
 const MENU_TTL = 300; // 5 minutes
 
@@ -22,6 +24,17 @@ interface MenuItemRow {
   url: string;
   target: string;
   order_index: number;
+
+  /**
+   * `link` (the default, and every row predating the autofill migration) or
+   * `post_autofill`. A `post_autofill` row names a post type instead of a URL
+   * and is expanded into one entry per published post before the tree is built
+   * — see menu-autofill.service.ts.
+   */
+  item_type?: string | null;
+  autofill_post_type_id?: string | null;
+  autofill_order?: string | null;
+  autofill_limit?: number | null;
 }
 
 interface MenuItemNode extends MenuItemRow {
@@ -148,10 +161,26 @@ async function fetchMenuItems(projectId: string, menuSlug: string): Promise<Menu
 
   if (!menu) return [];
 
+  // The autofill columns are part of this set: expansion has to know which rows
+  // are placeholders BEFORE the tree is built, because a placeholder is replaced
+  // by its posts rather than rendered. Drop them from this select and every
+  // placeholder silently renders as an empty <a href="">.
   const items: MenuItemRow[] = await db('menu_items')
     .where('menu_id', menu.id)
     .orderBy('order_index', 'asc')
-    .select('id', 'menu_id', 'parent_id', 'label', 'url', 'target', 'order_index');
+    .select(
+      'id',
+      'menu_id',
+      'parent_id',
+      'label',
+      'url',
+      'target',
+      'order_index',
+      'item_type',
+      'autofill_post_type_id',
+      'autofill_order',
+      'autofill_limit'
+    );
 
   try {
     await redis.set(cacheKey, JSON.stringify(items), 'EX', MENU_TTL);
@@ -215,7 +244,13 @@ export async function resolveMenus(
   let result = html;
 
   for (const shortcode of shortcodes) {
-    const items = await fetchMenuItems(projectId, shortcode.id);
+    const cachedItems = await fetchMenuItems(projectId, shortcode.id);
+
+    // Expansion runs AFTER the cache read, so what MENU_TTL holds is the
+    // placeholder, not the posts it resolves to. A doctor published a minute ago
+    // therefore appears on the next render rather than waiting out a five-minute
+    // menu window — which is the whole point of the feature.
+    const items = await expandAutofillItems(projectId, cachedItems);
 
     if (items.length === 0) {
       // No items or menu not found — render as nav with empty state
