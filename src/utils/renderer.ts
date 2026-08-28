@@ -15,6 +15,26 @@ function buildFormScript(projectId: string, apiBase: string): string {
   'use strict';
   var _ts=Date.now();
   var _jsc=_ts;for(var i=0;i<1000;i++){_jsc=((_jsc*1103515245+12345)&0x7fffffff);}
+  // FIRST-TOUCH ATTRIBUTION. Captured once per session, on the first page seen,
+  // so the channel recorded is the one that brought the visitor to THIS visit.
+  // The referrer goes up RAW: classification stays server-side in
+  // controllers/websiteContact/feature-utils/sourceAttribution.ts, where it is
+  // testable and earns the stronger client_referrer tier. An empty capture is
+  // still stored - presence of the key marks "first page seen", so a later
+  // internal referrer can never masquerade as the entry channel.
+  // Storage failures (private mode, disabled) must never break the form.
+  var _ft=null;
+  try{
+    var _ftRaw=window.sessionStorage.getItem('_alloro_ft');
+    if(_ftRaw){_ft=JSON.parse(_ftRaw);}
+    if(!_ft||typeof _ft!=='object'){
+      var _um=window.location.search.match(/[?&]utm_source=([^&#]*)/);
+      var _u='';
+      if(_um&&_um[1]){try{_u=decodeURIComponent(_um[1].replace(/\\+/g,' '));}catch(_e){_u=_um[1];}}
+      _ft={r:String(document.referrer||'').slice(0,2048),u:_u.slice(0,100)};
+      window.sessionStorage.setItem('_alloro_ft',JSON.stringify(_ft));
+    }
+  }catch(_e){_ft=null;}
   document.addEventListener('DOMContentLoaded',function(){
     var API='${apiBase}';
     var PID='${projectId}';
@@ -73,10 +93,13 @@ function buildFormScript(projectId: string, apiBase: string): string {
         var btn=form.querySelector('button[type="submit"],input[type="submit"]');
         var origText=btn?btn.textContent:'';
         if(btn){btn.disabled=true;btn.textContent='Sending...';}
+        var payload={projectId:PID,formName:formName,formType:formType,contents:contents,_hp:hp.value,_ts:_ts,_jsc:_jsc};
+        if(_ft&&_ft.r){payload.first_touch_referrer=_ft.r;}
+        if(_ft&&_ft.u){payload.utm_source=_ft.u;}
         fetch(API+'/api/websites/form-submission',{
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({projectId:PID,formName:formName,formType:formType,contents:contents,_hp:hp.value,_ts:_ts,_jsc:_jsc})
+          body:JSON.stringify(payload)
         })
         .then(function(r){if(!r.ok)throw new Error('fail');return r.json();})
         .then(function(){

@@ -6,7 +6,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "check:form-contract": "tsx scripts/check-form-contract.ts"
   },
   "dependencies": {
     "@tailwindcss/node": "^4.2.1",
