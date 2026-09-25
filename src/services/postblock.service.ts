@@ -15,6 +15,7 @@ import { parseShortcodes, hasPostBlockShortcodes, renderPostBlockHtml, escapeHtm
 import { getPaginationScript } from '../utils/pagination-client';
 import type { Section } from '../types';
 import crypto from 'crypto';
+import { emptyShortcodeState } from '../utils/empty-shortcode-state';
 
 const POST_BLOCK_TTL = 300; // 5 minutes
 const POSTS_TTL = 120; // 2 minutes
@@ -361,8 +362,9 @@ export async function resolvePostBlocks(
     const posts = await fetchPosts(projectId, block.post_type_slug, effectiveShortcode);
 
     if (posts.length === 0) {
-      // No posts — render empty
-      result = result.replace(shortcode.raw, '');
+      // Only opted-in sites show a provisional state; legacy shortcodes stay empty.
+      const fallback = shortcode.empty === 'placeholder' ? emptyShortcodeState(shortcode.id) : '';
+      result = result.replace(shortcode.raw, fallback);
       continue;
     }
 

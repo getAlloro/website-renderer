@@ -11,6 +11,7 @@ export interface PostBlockShortcode {
   raw: string;
   id: string;
   items: string;
+  empty: string;
   tags: string[];
   cats: string[];
   ids: string[];
@@ -63,6 +64,7 @@ export function parseShortcodes(html: string): PostBlockShortcode[] {
       raw,
       id: attrs.id,
       items: attrs.items,
+      empty: attrs.empty || '',
       tags: attrs.tags ? attrs.tags.split(',').map((s) => s.trim()).filter(Boolean) : [],
       cats: attrs.cats ? attrs.cats.split(',').map((s) => s.trim()).filter(Boolean) : [],
       ids: attrs.ids ? attrs.ids.split(',').map((s) => s.trim()).filter(Boolean) : [],
@@ -463,6 +465,7 @@ export function hasMenuShortcodes(html: string): boolean {
 export interface ReviewBlockShortcode {
   raw: string;
   id: string;
+  empty: string;
   location: string;
   min_rating: number;
   limit: number;
@@ -498,6 +501,7 @@ export function parseReviewBlockShortcodes(html: string): ReviewBlockShortcode[]
     results.push({
       raw,
       id: attrs.id,
+      empty: attrs.empty || '',
       location: attrs.location || 'primary',
       min_rating: attrs.min_rating ? parseInt(attrs.min_rating, 10) || 1 : 1,
       limit: attrs.limit !== undefined ? (parseInt(attrs.limit, 10) >= 0 ? parseInt(attrs.limit, 10) : 10) : 10,
