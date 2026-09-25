@@ -1,4 +1,5 @@
 import type { Section, SeoData } from '../types';
+import { schemaForServing } from './schemaServing';
 
 /**
  * Generates an inline <script> that auto-intercepts all forms on the page
@@ -504,7 +505,10 @@ export function injectSeoMeta(
 
   // 8. JSON-LD schema blocks — inject before </head>
   if (seoData.schema_json && Array.isArray(seoData.schema_json) && seoData.schema_json.length > 0) {
-    const schemaBlocks = seoData.schema_json
+    const schemas = serving
+      ? schemaForServing(seoData.schema_json, serving.host)
+      : seoData.schema_json;
+    const schemaBlocks = schemas
       .map((schema) => `<script type="application/ld+json">${JSON.stringify(schema)}</script>`)
       .join('\n');
     result = result.replace(/<\/head>/i, `${schemaBlocks}\n</head>`);
