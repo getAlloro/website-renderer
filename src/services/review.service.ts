@@ -17,10 +17,10 @@ import {
   hasReviewBlockShortcodes,
   renderReviewBlockHtml,
   escapeHtml,
-  type ReviewBlockShortcode,
 } from '../utils/shortcodes';
 import { getPaginationScript } from '../utils/pagination-client';
 import crypto from 'crypto';
+import { emptyShortcodeState } from '../utils/empty-shortcode-state';
 
 const REVIEW_BLOCK_TTL = 300; // 5 minutes
 const REVIEWS_TTL = 120; // 2 minutes
@@ -298,7 +298,8 @@ export async function resolveReviewBlocks(
   if (!hasReviewScope(scope)) {
     let result = html;
     for (const sc of shortcodes) {
-      result = result.replace(sc.raw, '');
+      const fallback = sc.empty === 'placeholder' ? emptyShortcodeState(sc.id) : '';
+      result = result.replace(sc.raw, fallback);
     }
     return result;
   }
@@ -334,7 +335,8 @@ export async function resolveReviewBlocks(
     const reviews = await fetchReviews(scope, effectiveShortcode);
 
     if (reviews.length === 0) {
-      result = result.replace(sc.raw, '');
+      const fallback = sc.empty === 'placeholder' ? emptyShortcodeState(sc.id) : '';
+      result = result.replace(sc.raw, fallback);
       continue;
     }
 
