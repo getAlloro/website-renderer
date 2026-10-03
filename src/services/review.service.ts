@@ -132,7 +132,12 @@ function buildVisibleReviewQuery(scope: ProjectReviewScope) {
       if (scope.placeIds.length > 0) this.orWhereIn('place_id', scope.placeIds);
     })
     .where('hidden', false)
-    .whereBetween('stars', [1, 5]);
+    .whereBetween('stars', [1, 5])
+    // A star-only review renders as an empty quote card, so blocks show reviews with text.
+    // Display-only: the `hidden` flag stays untouched, so reply drafting and owner counts
+    // in the Alloro app still see every review.
+    .whereNotNull('text')
+    .whereRaw("btrim(??) <> ''", ['text']);
 }
 
 /**

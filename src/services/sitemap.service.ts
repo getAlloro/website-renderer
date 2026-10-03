@@ -84,18 +84,18 @@ export async function buildSitemapXml(project: Project): Promise<string> {
   const db = getDb();
   const host = primaryPublicHost(project);
 
-  const pages: Array<{ path: string; updated_at: Date | string | null }> = await db(
+  const pages: Array<{ path: string; updated_at: Date | string | null; seo_data: unknown }> = await db(
     'website_builder.pages'
   )
     .where({ project_id: project.id, status: 'published' })
-    .select('path', 'updated_at');
+    .select('path', 'updated_at', 'seo_data');
 
-  const posts: Array<{ slug: string; type_slug: string; updated_at: Date | string | null }> =
+  const posts: Array<{ slug: string; type_slug: string; updated_at: Date | string | null; seo_data: unknown }> =
     await db('website_builder.posts as p')
       .join('website_builder.post_types as pt', 'p.post_type_id', 'pt.id')
       .where('p.project_id', project.id)
       .where('p.status', 'published')
-      .select('p.slug', 'pt.slug as type_slug', 'p.updated_at');
+      .select('p.slug', 'pt.slug as type_slug', 'p.updated_at', 'p.seo_data');
 
   const seen = new Set<string>();
   const entries: Array<{ path: string; lastmod: string | null }> = [];
@@ -106,14 +106,21 @@ export async function buildSitemapXml(project: Project): Promise<string> {
     return Number.isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
   };
 
+  // A page that asks search engines not to index it (robots "noindex", e.g. a form's
+  // thank-you page) does not belong in the sitemap.
+  const isNoindex = (seo: unknown): boolean => {
+    const robots = seo && typeof seo === 'object' ? (seo as { robots?: unknown }).robots : undefined;
+    return typeof robots === 'string' && /noindex/i.test(robots);
+  };
+
   for (const page of pages) {
-    if (!page.path || seen.has(page.path)) continue;
+    if (!page.path || seen.has(page.path) || isNoindex(page.seo_data)) continue;
     seen.add(page.path);
     entries.push({ path: page.path, lastmod: toLastmod(page.updated_at) });
   }
   for (const post of posts) {
     const path = `/${post.type_slug}/${post.slug}`;
-    if (seen.has(path)) continue;
+    if (seen.has(path) || isNoindex(post.seo_data)) continue;
     seen.add(path);
     entries.push({ path, lastmod: toLastmod(post.updated_at) });
   }

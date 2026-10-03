@@ -6,12 +6,22 @@ const redis = require('../dist/lib/redis');
 const rows = { post_blocks: [], posts: [], projects: [], review_blocks: [], reviews: [] };
 
 function query(table) {
-  const result = rows[table] || [];
+  let result = rows[table] || [];
   const chain = {
     join: () => chain,
     where: () => chain,
     whereIn: () => chain,
     whereBetween: () => chain,
+    // The two filters the review query uses to skip star-only reviews are applied for
+    // real, so a test can prove an empty review never renders.
+    whereNotNull: (column) => {
+      result = result.filter((row) => row[column] != null);
+      return chain;
+    },
+    whereRaw: (sql, bindings) => {
+      if (sql === "btrim(??) <> ''") result = result.filter((row) => String(row[bindings[0]]).trim() !== '');
+      return chain;
+    },
     orderBy: () => chain,
     limit: () => chain,
     offset: () => chain,
@@ -86,4 +96,24 @@ test('a real review replaces the review empty state', async () => {
   const html = await resolveReviewBlocks("{{ review_block id='review-grid' empty='placeholder' }}", 'project', 'template');
   assert.match(html, /Helpful visit/);
   assert.doesNotMatch(html, /data-alloro-empty-state/);
+});
+
+test('a star-only review never renders as an empty quote card', async () => {
+  rows.projects = [{ id: 'project', organization_id: null, selected_place_id: 'place-1' }];
+  rows.review_blocks = [{
+    slug: 'review-grid',
+    sections: [{ content: '<div>{{start_review_loop}}<p>{{review.text}}</p>{{end_review_loop}}</div>' }],
+  }];
+  const review = {
+    stars: 5, reviewer_photo_url: null, is_anonymous: false, review_created_at: null,
+    has_reply: false, reply_text: null, reply_date: null,
+  };
+  rows.reviews = [
+    { ...review, text: null, reviewer_name: 'Stars only' },
+    { ...review, text: '   ', reviewer_name: 'Blank text' },
+    { ...review, text: 'Saved my tooth', reviewer_name: 'Patient' },
+  ];
+  const html = await resolveReviewBlocks("{{ review_block id='review-grid' }}", 'project', 'template');
+  assert.match(html, /Saved my tooth/);
+  assert.equal((html.match(/<p>/g) || []).length, 1);
 });

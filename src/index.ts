@@ -7,12 +7,17 @@ import { siteRoute } from './routes/site';
 import { verifyDomainRoute } from './routes/verify-domain';
 import { apiRouter } from './routes/api';
 import { extractSubdomain } from './middleware/subdomain';
+import { securityHeaders } from './middleware/securityHeaders';
 import { getDb } from './lib/db';
 import { closeRedis } from './lib/redis';
 import { wrapInLayout } from './templates/layout';
 
 const app = express();
 const PORT = process.env.PORT || 7777;
+
+// Do not advertise the server framework; send the baseline security headers on every response.
+app.disable('x-powered-by');
+app.use(securityHeaders);
 
 // Ignore favicon requests
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
