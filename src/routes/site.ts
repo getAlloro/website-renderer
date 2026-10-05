@@ -5,7 +5,7 @@ import {
   getArchivedProjectByHostname,
   getArchivedProjectByCustomDomain,
 } from '../services/project.service';
-import { getPageToRender, hasPublishedPages, getArtifactPageByPrefix } from '../services/page.service';
+import { getPageToRender, hasPublishedPages, getArtifactPageByPrefix, isArtifactPath } from '../services/page.service';
 import { fetchArtifactIndexHtml, fetchArtifactAsset } from '../services/artifact.service';
 import { getSinglePostData } from '../services/singlepost.service';
 import { buildSitemapXml, buildRobotsTxt, primaryPublicHost } from '../services/sitemap.service';
@@ -444,6 +444,19 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
   // (no loop). Runs before robots/sitemap so those unify onto the same host too.
   if (customDomain && customDomain !== servingHost) {
     res.redirect(301, `https://${servingHost}${req.originalUrl}`);
+    return;
+  }
+
+  // Trailing-slash unification: pages match by exact path, so /about/ 404s while a
+  // post such as /services/x/ renders a duplicate of /services/x. Send every non-root
+  // path ending in "/" to its no-slash form with a 301, keeping the query string.
+  // Leading slashes collapse to one so "//other.host/" can never become an off-site
+  // redirect. Artifact apps are exempt: a React build can rely on the slash for
+  // relative asset URLs. Runs before the redirect table, which strips slashes itself.
+  if (pagePath.length > 1 && pagePath.endsWith('/') && !(await isArtifactPath(project.id, pagePath))) {
+    const target = '/' + pagePath.replace(/^\/+/, '').replace(/\/+$/, '');
+    const query = req.originalUrl.slice(req.path.length);
+    res.redirect(301, `${target}${query}`);
     return;
   }
 
