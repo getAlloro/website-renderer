@@ -476,7 +476,7 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
   // generation is tracked at the page level via generation_status.
   const hasPages = await hasPublishedPages(project.id);
   if (!hasPages) {
-    res.type('html').send(siteNotReadyPage(businessName));
+    res.status(404).type('html').send(siteNotReadyPage(businessName));
     return;
   }
 

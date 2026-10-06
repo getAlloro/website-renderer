@@ -16,29 +16,13 @@ export async function getPublishedPage(
   return page || null;
 }
 
-export async function getDraftPage(
-  projectId: string,
-  path: string
-): Promise<Page | null> {
-  const page = await getDb()('pages')
-    .where({
-      project_id: projectId,
-      path,
-      status: 'draft',
-    })
-    .first();
-
-  return page || null;
-}
-
 export async function getPageToRender(
   projectId: string,
   path: string
 ): Promise<Page | null> {
-  const published = await getPublishedPage(projectId, path);
-  if (published) return published;
-
-  return getDraftPage(projectId, path);
+  // Public hosts are not draft previews. A published sibling never authorizes
+  // rendering a different path's draft.
+  return getPublishedPage(projectId, path);
 }
 
 export async function hasPublishedPages(projectId: string): Promise<boolean> {
@@ -57,8 +41,7 @@ export async function hasPublishedPages(projectId: string): Promise<boolean> {
  */
 export async function isArtifactPath(projectId: string, requestPath: string): Promise<boolean> {
   const rows: Array<{ path: string }> = await getDb()('pages')
-    .where({ project_id: projectId, page_type: 'artifact' })
-    .whereIn('status', ['published', 'draft'])
+    .where({ project_id: projectId, page_type: 'artifact', status: 'published' })
     .select('path');
   const bare = requestPath.replace(/\/+$/, '');
   return rows.some((row) => {
@@ -81,8 +64,8 @@ export async function getArtifactPageByPrefix(
     .where({
       project_id: projectId,
       page_type: 'artifact',
+      status: 'published',
     })
-    .whereIn('status', ['published', 'draft'])
     .orderByRaw('LENGTH(path) DESC');
 
   for (const page of artifactPages) {
