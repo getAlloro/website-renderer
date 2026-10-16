@@ -344,6 +344,24 @@ function escapeAttr(str: string): string {
     .replace(/>/g, '&gt;');
 }
 
+/**
+ * Serialize a JSON-LD object for an inline <script> element.
+ *
+ * JSON.stringify leaves `<`, `>` and `&` raw, so a stored value could end the
+ * script element early. These characters only ever occur inside JSON strings,
+ * so swapping them for \u escapes keeps the text inert in HTML while parsing
+ * back to the identical JSON. U+2028/U+2029 are escaped for parsers that treat
+ * them as line breaks.
+ */
+function serializeJsonLd(schema: unknown): string {
+  return JSON.stringify(schema)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 /** Where a page/post is actually being served — drives canonical/og:url self-derivation. */
 export interface ServingContext {
   /** The project's primary public host (custom domain, or generated hostname + .sites.getalloro.com). */
@@ -509,9 +527,10 @@ export function injectSeoMeta(
       ? schemaForServing(seoData.schema_json, serving.host)
       : seoData.schema_json;
     const schemaBlocks = schemas
-      .map((schema) => `<script type="application/ld+json">${JSON.stringify(schema)}</script>`)
+      .map((schema) => `<script type="application/ld+json">${serializeJsonLd(schema)}</script>`)
       .join('\n');
-    result = result.replace(/<\/head>/i, `${schemaBlocks}\n</head>`);
+    // Replacer function: `$` sequences in schema values must render literally.
+    result = result.replace(/<\/head>/i, () => `${schemaBlocks}\n</head>`);
   }
 
   return result;
