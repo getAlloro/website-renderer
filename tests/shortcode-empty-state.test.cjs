@@ -115,5 +115,6 @@ test('a star-only review never renders as an empty quote card', async () => {
   ];
   const html = await resolveReviewBlocks("{{ review_block id='review-grid' }}", 'project', 'template');
   assert.match(html, /Saved my tooth/);
-  assert.equal((html.match(/<p>/g) || []).length, 1);
+  // One review card. Counted by tag name, since the review text <p> now carries the Read more tag.
+  assert.equal((html.match(/<p[\s>]/g) || []).length, 1);
 });

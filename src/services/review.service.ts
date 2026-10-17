@@ -19,6 +19,11 @@ import {
   escapeHtml,
 } from '../utils/shortcodes';
 import { getPaginationScript } from '../utils/pagination-client';
+import {
+  hasOwnReadMore,
+  markReviewTextElement,
+  getReviewReadMoreScript,
+} from '../utils/review-read-more';
 import crypto from 'crypto';
 import { emptyShortcodeState } from '../utils/empty-shortcode-state';
 
@@ -322,6 +327,7 @@ export async function resolveReviewBlocks(
 
   let result = html;
   let hasPagination = false;
+  let hasReadMore = false;
 
   for (const sc of shortcodes) {
     const block = blockMap.get(sc.id);
@@ -363,6 +369,16 @@ export async function resolveReviewBlocks(
       before = blockHtml.slice(0, startIdx);
       template = blockHtml.slice(startIdx + startMarker.length, endIdx);
       after = blockHtml.slice(endIdx + endMarker.length);
+    }
+
+    // Tag the review text so long reviews clamp with a Read more button. Done before rendering
+    // and before the template is encoded, so Load more / numbered pages carry the tag too.
+    if (!hasOwnReadMore(blockHtml)) {
+      const marked = markReviewTextElement(template);
+      if (marked !== template) {
+        template = marked;
+        hasReadMore = true;
+      }
     }
 
     // Render each review through the template
@@ -430,6 +446,11 @@ export async function resolveReviewBlocks(
   if (hasPagination) {
     const script = getPaginationScript();
     result = result.replace('</body>', script + '</body>');
+  }
+
+  if (hasReadMore) {
+    const script = getReviewReadMoreScript();
+    result = result.replace('</body>', () => script + '</body>');
   }
 
   return result;
