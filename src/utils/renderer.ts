@@ -276,7 +276,9 @@ export function renderPage(
     /<script data-alloro-form-handler>[\s\S]*?<\/script>/gi,
     ''
   );
-  let finalHtml = cleanWrapper.replace('{{slot}}', pageContent);
+  // A function, not a string: a string replacement reads $$, $& and $' in page
+  // or post text as patterns, so "$$" would render as "$".
+  let finalHtml = cleanWrapper.replace('{{slot}}', () => pageContent);
 
   // Inject code snippets
   if (codeSnippets && codeSnippets.length > 0) {

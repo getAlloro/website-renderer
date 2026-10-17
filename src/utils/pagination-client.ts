@@ -20,29 +20,29 @@ function starsHtml(n){n=Math.round(Number(n)||0);var h='';for(var i=1;i<=5;i++){
 function renderItem(tpl,item,type){
   var html=tpl;
   if(type==='post'){
-    html=html.replace(/\\{\\{post\\.title\\}\\}/g,esc(item.title));
-    html=html.replace(/\\{\\{post\\.slug\\}\\}/g,esc(item.slug));
-    html=html.replace(/\\{\\{post\\.url\\}\\}/g,esc(item.url));
-    html=html.replace(/\\{\\{post\\.excerpt\\}\\}/g,esc(item.excerpt));
-    html=html.replace(/\\{\\{post\\.featured_image\\}\\}/g,esc(item.featured_image));
-    html=html.replace(/\\{\\{post\\.categories\\}\\}/g,esc((item.categories||[]).join(', ')));
-    html=html.replace(/\\{\\{post\\.tags\\}\\}/g,esc((item.tags||[]).join(', ')));
-    html=html.replace(/\\{\\{post\\.created_at\\}\\}/g,fmtDate(item.created_at));
-    html=html.replace(/\\{\\{post\\.updated_at\\}\\}/g,fmtDate(item.updated_at));
-    html=html.replace(/\\{\\{post\\.published_at\\}\\}/g,fmtDate(item.published_at));
-    html=html.replace(/\\{\\{post\\.content\\}\\}/g,item.content||'');
+    html=html.replace(/\\{\\{post\\.title\\}\\}/g,function(){return esc(item.title)});
+    html=html.replace(/\\{\\{post\\.slug\\}\\}/g,function(){return esc(item.slug)});
+    html=html.replace(/\\{\\{post\\.url\\}\\}/g,function(){return esc(item.url)});
+    html=html.replace(/\\{\\{post\\.excerpt\\}\\}/g,function(){return esc(item.excerpt)});
+    html=html.replace(/\\{\\{post\\.featured_image\\}\\}/g,function(){return esc(item.featured_image)});
+    html=html.replace(/\\{\\{post\\.categories\\}\\}/g,function(){return esc((item.categories||[]).join(', '))});
+    html=html.replace(/\\{\\{post\\.tags\\}\\}/g,function(){return esc((item.tags||[]).join(', '))});
+    html=html.replace(/\\{\\{post\\.created_at\\}\\}/g,function(){return fmtDate(item.created_at)});
+    html=html.replace(/\\{\\{post\\.updated_at\\}\\}/g,function(){return fmtDate(item.updated_at)});
+    html=html.replace(/\\{\\{post\\.published_at\\}\\}/g,function(){return fmtDate(item.published_at)});
+    html=html.replace(/\\{\\{post\\.content\\}\\}/g,function(){return item.content||''});
     html=html.replace(/\\{\\{post\\.custom\\.(\\w+)\\}\\}/g,function(_,k){var cf=item.custom_fields||{};return esc(cf[k]!=null?cf[k]:'')});
   }else{
-    html=html.replace(/\\{\\{review\\.stars\\}\\}/g,esc(item.stars));
-    html=html.replace(/\\{\\{review\\.stars_html\\}\\}/g,starsHtml(item.stars));
-    html=html.replace(/\\{\\{review\\.text\\}\\}/g,esc(item.text));
-    html=html.replace(/\\{\\{review\\.reviewer_name\\}\\}/g,esc(item.reviewer_name));
-    html=html.replace(/\\{\\{review\\.reviewer_photo\\}\\}/g,esc(item.reviewer_photo_url));
-    html=html.replace(/\\{\\{review\\.date\\}\\}/g,fmtDate(item.review_created_at));
-    html=html.replace(/\\{\\{review\\.is_anonymous\\}\\}/g,esc(item.is_anonymous));
-    html=html.replace(/\\{\\{review\\.has_reply\\}\\}/g,esc(item.has_reply));
-    html=html.replace(/\\{\\{review\\.reply_text\\}\\}/g,esc(item.reply_text));
-    html=html.replace(/\\{\\{review\\.reply_date\\}\\}/g,fmtDate(item.reply_date));
+    html=html.replace(/\\{\\{review\\.stars\\}\\}/g,function(){return esc(item.stars)});
+    html=html.replace(/\\{\\{review\\.stars_html\\}\\}/g,function(){return starsHtml(item.stars)});
+    html=html.replace(/\\{\\{review\\.text\\}\\}/g,function(){return esc(item.text)});
+    html=html.replace(/\\{\\{review\\.reviewer_name\\}\\}/g,function(){return esc(item.reviewer_name)});
+    html=html.replace(/\\{\\{review\\.reviewer_photo\\}\\}/g,function(){return esc(item.reviewer_photo_url)});
+    html=html.replace(/\\{\\{review\\.date\\}\\}/g,function(){return fmtDate(item.review_created_at)});
+    html=html.replace(/\\{\\{review\\.is_anonymous\\}\\}/g,function(){return esc(item.is_anonymous)});
+    html=html.replace(/\\{\\{review\\.has_reply\\}\\}/g,function(){return esc(item.has_reply)});
+    html=html.replace(/\\{\\{review\\.reply_text\\}\\}/g,function(){return esc(item.reply_text)});
+    html=html.replace(/\\{\\{review\\.reply_date\\}\\}/g,function(){return fmtDate(item.reply_date)});
   }
   return html;
 }

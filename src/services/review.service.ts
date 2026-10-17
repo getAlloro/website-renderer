@@ -309,7 +309,7 @@ export async function resolveReviewBlocks(
     let result = html;
     for (const sc of shortcodes) {
       const fallback = sc.empty === 'placeholder' ? emptyShortcodeState(sc.id) : '';
-      result = result.replace(sc.raw, fallback);
+      result = result.replace(sc.raw, () => fallback);
     }
     return result;
   }
@@ -325,6 +325,7 @@ export async function resolveReviewBlocks(
     })
   );
 
+  // Every splice below passes a function, so $$, $& and $' in review text stay literal.
   let result = html;
   let hasPagination = false;
   let hasReadMore = false;
@@ -347,7 +348,7 @@ export async function resolveReviewBlocks(
 
     if (reviews.length === 0) {
       const fallback = sc.empty === 'placeholder' ? emptyShortcodeState(sc.id) : '';
-      result = result.replace(sc.raw, fallback);
+      result = result.replace(sc.raw, () => fallback);
       continue;
     }
 
@@ -436,16 +437,16 @@ export async function resolveReviewBlocks(
         afterWithControls = controls;
       }
 
-      result = result.replace(sc.raw, before + gridContent + afterWithControls);
+      result = result.replace(sc.raw, () => before + gridContent + afterWithControls);
     } else {
-      result = result.replace(sc.raw, before + renderedReviews.join('\n') + after);
+      result = result.replace(sc.raw, () => before + renderedReviews.join('\n') + after);
     }
   }
 
   // Inject pagination client script if any review block uses pagination
   if (hasPagination) {
     const script = getPaginationScript();
-    result = result.replace('</body>', script + '</body>');
+    result = result.replace('</body>', () => script + '</body>');
   }
 
   if (hasReadMore) {

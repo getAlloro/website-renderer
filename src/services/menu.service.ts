@@ -254,7 +254,7 @@ export async function resolveMenus(
 
     if (items.length === 0) {
       // No items or menu not found — render as nav with empty state
-      result = result.replace(shortcode.raw, `<nav data-menu="${escapeHtml(shortcode.id)}"></nav>`);
+      result = result.replace(shortcode.raw, () => `<nav data-menu="${escapeHtml(shortcode.id)}"></nav>`);
       continue;
     }
 
@@ -271,7 +271,7 @@ export async function resolveMenus(
 
         if (templateHtml) {
           const rendered = renderMenuWithTemplate(tree, templateHtml);
-          result = result.replace(shortcode.raw, rendered);
+          result = result.replace(shortcode.raw, () => rendered);
           continue;
         }
       }
@@ -279,7 +279,7 @@ export async function resolveMenus(
 
     // Fallback: bare HTML rendering
     const menuHtml = `<nav data-menu="${escapeHtml(shortcode.id)}">${renderMenuHtml(tree, true)}</nav>`;
-    result = result.replace(shortcode.raw, menuHtml);
+    result = result.replace(shortcode.raw, () => menuHtml);
   }
 
   return result;

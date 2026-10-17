@@ -339,7 +339,8 @@ export async function resolvePostBlocks(
     })
   );
 
-  // Process each shortcode
+  // Process each shortcode. Every splice passes a function, so $$, $& and $' in
+  // post text stay literal.
   let result = html;
   let hasPagination = false;
 
@@ -364,7 +365,7 @@ export async function resolvePostBlocks(
     if (posts.length === 0) {
       // Only opted-in sites show a provisional state; legacy shortcodes stay empty.
       const fallback = shortcode.empty === 'placeholder' ? emptyShortcodeState(shortcode.id) : '';
-      result = result.replace(shortcode.raw, fallback);
+      result = result.replace(shortcode.raw, () => fallback);
       continue;
     }
 
@@ -473,16 +474,16 @@ export async function resolvePostBlocks(
         afterWithControls = controls;
       }
 
-      result = result.replace(shortcode.raw, before + gridContent + afterWithControls);
+      result = result.replace(shortcode.raw, () => before + gridContent + afterWithControls);
     } else {
-      result = result.replace(shortcode.raw, before + renderedPosts.join('\n') + after);
+      result = result.replace(shortcode.raw, () => before + renderedPosts.join('\n') + after);
     }
   }
 
   // Inject pagination client script if any post block uses pagination
   if (hasPagination) {
     const script = getPaginationScript();
-    result = result.replace('</body>', script + '</body>');
+    result = result.replace('</body>', () => script + '</body>');
   }
 
   return result;
