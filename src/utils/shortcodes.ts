@@ -306,10 +306,10 @@ export function renderGalleryLoops(
           }
           return escapeHtml(String(v));
         };
-        out = out.replace(/\{\{\s*item\.url\s*\}\}/g, get('url'));
-        out = out.replace(/\{\{\s*item\.link\s*\}\}/g, get('link'));
-        out = out.replace(/\{\{\s*item\.alt\s*\}\}/g, get('alt'));
-        out = out.replace(/\{\{\s*item\.caption\s*\}\}/g, get('caption'));
+        out = out.replace(/\{\{\s*item\.url\s*\}\}/g, () => get('url'));
+        out = out.replace(/\{\{\s*item\.link\s*\}\}/g, () => get('link'));
+        out = out.replace(/\{\{\s*item\.alt\s*\}\}/g, () => get('alt'));
+        out = out.replace(/\{\{\s*item\.caption\s*\}\}/g, () => get('caption'));
         return out;
       });
 
@@ -331,18 +331,20 @@ export function renderPostBlockHtml(
   // empty, before any token replacement runs.
   const processed = processConditionals(afterGallery, post);
 
+  // Values go in through a function so $$, $& and $' in post text stay literal.
+
   let html = processed
-    .replace(/\{\{post\.title\}\}/g, escapeHtml(post.title))
-    .replace(/\{\{post\.slug\}\}/g, escapeHtml(post.slug))
-    .replace(/\{\{post\.url\}\}/g, escapeHtml(post.url))
-    .replace(/\{\{post\.content\}\}/g, wrapPostContent(post.content)) // raw HTML — trusted, wrapped with typography
-    .replace(/\{\{post\.excerpt\}\}/g, escapeHtml(post.excerpt || ''))
-    .replace(/\{\{post\.featured_image\}\}/g, escapeHtml(post.featured_image || ''))
-    .replace(/\{\{post\.categories\}\}/g, escapeHtml(post.categories))
-    .replace(/\{\{post\.tags\}\}/g, escapeHtml(post.tags))
-    .replace(/\{\{post\.created_at\}\}/g, escapeHtml(post.created_at))
-    .replace(/\{\{post\.updated_at\}\}/g, escapeHtml(post.updated_at))
-    .replace(/\{\{post\.published_at\}\}/g, escapeHtml(post.published_at));
+    .replace(/\{\{post\.title\}\}/g, () => escapeHtml(post.title))
+    .replace(/\{\{post\.slug\}\}/g, () => escapeHtml(post.slug))
+    .replace(/\{\{post\.url\}\}/g, () => escapeHtml(post.url))
+    .replace(/\{\{post\.content\}\}/g, () => wrapPostContent(post.content)) // raw HTML — trusted, wrapped with typography
+    .replace(/\{\{post\.excerpt\}\}/g, () => escapeHtml(post.excerpt || ''))
+    .replace(/\{\{post\.featured_image\}\}/g, () => escapeHtml(post.featured_image || ''))
+    .replace(/\{\{post\.categories\}\}/g, () => escapeHtml(post.categories))
+    .replace(/\{\{post\.tags\}\}/g, () => escapeHtml(post.tags))
+    .replace(/\{\{post\.created_at\}\}/g, () => escapeHtml(post.created_at))
+    .replace(/\{\{post\.updated_at\}\}/g, () => escapeHtml(post.updated_at))
+    .replace(/\{\{post\.published_at\}\}/g, () => escapeHtml(post.published_at));
 
   // Video embed — generates responsive iframe from video_url custom field
   html = html.replace(/\{\{post\.video_embed\}\}/g, () => {
@@ -543,6 +545,8 @@ function formatReviewDate(dateStr: string | Date | null): string {
 
 /**
  * Replace {{review.*}} tokens in review block HTML with actual review data.
+ * Values go in through a function: a string replacement reads $$, $& and $'
+ * in review text as patterns, so "$$" would render as "$".
  */
 export function renderReviewBlockHtml(
   template: string,
@@ -559,15 +563,15 @@ export function renderReviewBlockHtml(
   }
 ): string {
   let html = template;
-  html = html.replace(/\{\{review\.stars\}\}/g, String(review.stars || 0));
-  html = html.replace(/\{\{review\.stars_html\}\}/g, generateStarsHtml(review.stars || 0));
-  html = html.replace(/\{\{review\.text\}\}/g, escapeHtml(review.text || ''));
-  html = html.replace(/\{\{review\.reviewer_name\}\}/g, escapeHtml(review.reviewer_name || 'Anonymous'));
-  html = html.replace(/\{\{review\.reviewer_photo\}\}/g, escapeHtml(review.reviewer_photo_url || ''));
-  html = html.replace(/\{\{review\.is_anonymous\}\}/g, String(review.is_anonymous || false));
-  html = html.replace(/\{\{review\.date\}\}/g, escapeHtml(formatReviewDate(review.review_created_at)));
-  html = html.replace(/\{\{review\.has_reply\}\}/g, String(review.has_reply || false));
-  html = html.replace(/\{\{review\.reply_text\}\}/g, escapeHtml(review.reply_text || ''));
-  html = html.replace(/\{\{review\.reply_date\}\}/g, escapeHtml(formatReviewDate(review.reply_date)));
+  html = html.replace(/\{\{review\.stars\}\}/g, () => String(review.stars || 0));
+  html = html.replace(/\{\{review\.stars_html\}\}/g, () => generateStarsHtml(review.stars || 0));
+  html = html.replace(/\{\{review\.text\}\}/g, () => escapeHtml(review.text || ''));
+  html = html.replace(/\{\{review\.reviewer_name\}\}/g, () => escapeHtml(review.reviewer_name || 'Anonymous'));
+  html = html.replace(/\{\{review\.reviewer_photo\}\}/g, () => escapeHtml(review.reviewer_photo_url || ''));
+  html = html.replace(/\{\{review\.is_anonymous\}\}/g, () => String(review.is_anonymous || false));
+  html = html.replace(/\{\{review\.date\}\}/g, () => escapeHtml(formatReviewDate(review.review_created_at)));
+  html = html.replace(/\{\{review\.has_reply\}\}/g, () => String(review.has_reply || false));
+  html = html.replace(/\{\{review\.reply_text\}\}/g, () => escapeHtml(review.reply_text || ''));
+  html = html.replace(/\{\{review\.reply_date\}\}/g, () => escapeHtml(formatReviewDate(review.reply_date)));
   return html;
 }
