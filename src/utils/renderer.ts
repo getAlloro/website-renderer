@@ -97,6 +97,8 @@ function buildFormScript(projectId: string, apiBase: string): string {
         var payload={projectId:PID,formName:formName,formType:formType,contents:contents,_hp:hp.value,_ts:_ts,_jsc:_jsc};
         if(_ft&&_ft.r){payload.first_touch_referrer=_ft.r;}
         if(_ft&&_ft.u){payload.utm_source=_ft.u;}
+        var _fid=form.getAttribute('data-form-id');if(_fid){payload.formId=_fid;}
+        var _fvid=form.getAttribute('data-form-version-id');if(_fvid){payload.formVersionId=_fvid;}
         fetch(API+'/api/websites/form-submission',{
           method:'POST',
           headers:{'Content-Type':'application/json'},
