@@ -575,3 +575,46 @@ export function renderReviewBlockHtml(
   html = html.replace(/\{\{review\.reply_date\}\}/g, () => escapeHtml(formatReviewDate(review.reply_date)));
   return html;
 }
+
+// =====================================================================
+// FORM BLOCK SHORTCODES
+// =====================================================================
+
+export interface FormBlockShortcode {
+  raw: string;
+  id: string; // forms.id (uuid), lower-cased
+}
+
+/**
+ * {{ form_block id='<uuid>' }} — placed on a site's page by the Forms dashboard.
+ * Same spelling as FORM_BLOCK_ID_TOKEN_RE in the Alloro app
+ * (src/utils/website-forms/formBlockToken.ts); the two repos cannot share code.
+ */
+export const FORM_BLOCK_SHORTCODE_REGEX = /\{\{\s*form_block\s+id='([0-9a-f-]{36})'\s*\}\}/gi;
+
+/**
+ * Parse all {{ form_block id='…' }} shortcodes from an HTML string.
+ * One entry per distinct id (lower-cased); `raw` is the first spelling seen.
+ */
+export function parseFormBlockShortcodes(html: string): FormBlockShortcode[] {
+  const results: FormBlockShortcode[] = [];
+  const seen = new Set<string>();
+  FORM_BLOCK_SHORTCODE_REGEX.lastIndex = 0;
+
+  let match: RegExpExecArray | null;
+  while ((match = FORM_BLOCK_SHORTCODE_REGEX.exec(html)) !== null) {
+    const id = match[1].toLowerCase();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    results.push({ raw: match[0], id });
+  }
+
+  return results;
+}
+
+/**
+ * Check if an HTML string contains any {{ form_block }} shortcodes.
+ */
+export function hasFormBlockShortcodes(html: string): boolean {
+  return html.includes('form_block');
+}

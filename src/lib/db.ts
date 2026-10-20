@@ -11,7 +11,9 @@ function buildConfig(): Knex.Config {
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
-      ssl: { rejectUnauthorized: false },
+      // DB_SSL=false turns TLS off for a local, disposable Postgres (the proving runtime); every
+      // deployed environment keeps the default.
+      ssl: process.env.DB_SSL === 'false' ? false : { rejectUnauthorized: false },
     },
     searchPath: [defaultSchema, 'public'],
   };

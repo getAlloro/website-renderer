@@ -18,6 +18,7 @@ import { renderPage, normalizeSections, injectSeoMeta } from '../utils/renderer'
 import { resolvePostBlocks } from '../services/postblock.service';
 import { resolveMenus } from '../services/menu.service';
 import { resolveReviewBlocks } from '../services/review.service';
+import { resolveFormBlocks } from '../services/form.service';
 import { resolveRedirect as resolveRedirectForProject } from '../services/redirect.service';
 import { renderPostBlockHtml } from '../utils/shortcodes';
 import { processTailwindCSS } from '../utils/tailwind';
@@ -162,6 +163,9 @@ async function assembleHtml(project: Project, page: Page, servingHost: string): 
 
   // Resolve {{ menu id='slug' }} shortcodes
   html = await resolveMenus(html, project.id, project.template_id || undefined);
+
+  // Resolve {{ form_block id='uuid' }} shortcodes (published form markup)
+  html = await resolveFormBlocks(html, project.id);
 
   // Inject page-level SEO meta tags (replaces or adds to wrapper).
   // The serving context makes canonical/og:url self-derived and always
@@ -355,6 +359,9 @@ async function assembleSinglePostHtml(
   // Resolve {{ menu id='slug' }} shortcodes
   html = await resolveMenus(html, project.id, project.template_id || undefined);
 
+  // Resolve {{ form_block id='uuid' }} shortcodes (published form markup)
+  html = await resolveFormBlocks(html, project.id);
+
   // Inject post-level SEO meta tags (canonical/og:url self-derived)
   const postSeoData = post.seo_data as SeoData | null;
   html = injectSeoMeta(html, postSeoData, {
@@ -386,7 +393,7 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
   if (req.query.nocache === '1') {
     try {
       const redis = getRedis();
-      const patterns = ['pb:*', 'posts:*', 'sp:*', 'mt:*', 'menu:*', 'tw:*', 'redir:*', 'rb:*', 'reviews:*', 'sitemap:*', 'robots:*'];
+      const patterns = ['pb:*', 'posts:*', 'sp:*', 'mt:*', 'menu:*', 'tw:*', 'redir:*', 'rb:*', 'reviews:*', 'sitemap:*', 'robots:*', 'form:*'];
       for (const pattern of patterns) {
         let cursor = '0';
         do {
