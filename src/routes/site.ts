@@ -22,6 +22,8 @@ import { resolveFormBlocks } from '../services/form.service';
 import { resolveRedirect as resolveRedirectForProject } from '../services/redirect.service';
 import { renderPostBlockHtml } from '../utils/shortcodes';
 import { processTailwindCSS } from '../utils/tailwind';
+import { localizeVersionedImports } from '../utils/versionedImports';
+import { getApiBaseUrl } from '../lib/apiBaseUrl';
 import type { Project, Page, SeoData } from '../types';
 import { getDb } from '../lib/db';
 import { getRedis } from '../lib/redis';
@@ -52,10 +54,6 @@ function mergeCodeSnippets(templateSnippets: any[], projectSnippets: any[]): any
   }
 
   return result;
-}
-
-function getApiBaseUrl(): string {
-  return process.env.API_BASE_URL || 'https://app.getalloro.com';
 }
 
 const RYBBIT_API_URL = process.env.RYBBIT_API_URL || 'https://analytics.getalloro.com';
@@ -180,6 +178,9 @@ async function assembleHtml(project: Project, page: Page, servingHost: string): 
   // Tailwind CSS: compile for published, Play CDN for drafts
   html = await processTailwindCSS(html, page.status === 'draft');
 
+  // Versioned app imports (stylesheets, scripts) are served from this origin
+  html = localizeVersionedImports(html, getApiBaseUrl());
+
   return html;
 }
 
@@ -257,6 +258,9 @@ async function assembleArtifactHtml(project: Project, page: Page, servingHost: s
   // Inject integration-managed tracking scripts after legacy snippets so duplicates can be skipped.
   const integrationScripts = await getIntegrationScripts(project.id, html);
   html = injectBeforeHeadClose(html, integrationScripts);
+
+  // Versioned app imports (stylesheets, scripts) are served from this origin
+  html = localizeVersionedImports(html, getApiBaseUrl());
 
   return html;
 }
@@ -376,6 +380,9 @@ async function assembleSinglePostHtml(
   // Tailwind CSS: single post pages are always published content
   html = await processTailwindCSS(html, false);
 
+  // Versioned app imports (stylesheets, scripts) are served from this origin
+  html = localizeVersionedImports(html, getApiBaseUrl());
+
   return html;
 }
 
@@ -393,7 +400,7 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
   if (req.query.nocache === '1') {
     try {
       const redis = getRedis();
-      const patterns = ['pb:*', 'posts:*', 'sp:*', 'mt:*', 'menu:*', 'tw:*', 'redir:*', 'rb:*', 'reviews:*', 'sitemap:*', 'robots:*', 'form:*'];
+      const patterns = ['pb:*', 'posts:*', 'sp:*', 'mt:*', 'menu:*', 'tw:*', 'redir:*', 'rb:*', 'reviews:*', 'sitemap:*', 'robots:*', 'form:*', 'imp:*'];
       for (const pattern of patterns) {
         let cursor = '0';
         do {
