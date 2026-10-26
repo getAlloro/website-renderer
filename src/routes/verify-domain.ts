@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { getProjectByHostname } from '../services/project.service';
+import { getProjectByHostname, isPendingOrRedirectDomain } from '../services/project.service';
 import { getDb } from '../lib/db';
 
 export async function verifyDomainRoute(req: Request, res: Response): Promise<void> {
@@ -30,6 +30,15 @@ export async function verifyDomainRoute(req: Request, res: Response): Promise<vo
     .first();
 
   if (project) {
+    res.status(200).end();
+    return;
+  }
+
+  // Domain switch: a pending new domain needs a certificate before promotion
+  // (the site serves on it as soon as DNS points here), and an old domain kept
+  // as a redirect needs one to answer https:// with the 301. Same existence-only
+  // semantics as the check above.
+  if (await isPendingOrRedirectDomain(domain)) {
     res.status(200).end();
     return;
   }
