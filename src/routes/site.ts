@@ -4,6 +4,8 @@ import {
   getProjectByCustomDomain,
   getArchivedProjectByHostname,
   getArchivedProjectByCustomDomain,
+  getProjectByPendingDomain,
+  getDomainRedirectTarget,
 } from '../services/project.service';
 import { getPageToRender, hasPublishedPages, getArtifactPageByPrefix, isArtifactPath } from '../services/page.service';
 import { fetchArtifactIndexHtml, fetchArtifactAsset } from '../services/artifact.service';
@@ -55,6 +57,14 @@ function mergeCodeSnippets(templateSnippets: any[], projectSnippets: any[]): any
 
   return result;
 }
+
+/**
+ * Browser cache lifetime for the old-domain → new-domain 301. A 301 with no
+ * Cache-Control can be cached by a browser indefinitely; if the owner later
+ * switches back, that browser would bounce new → old → new forever. One day
+ * keeps the permanent-redirect signal for search engines while bounding that.
+ */
+const DOMAIN_SWITCH_REDIRECT_MAX_AGE_SECONDS = 86400;
 
 const RYBBIT_API_URL = process.env.RYBBIT_API_URL || 'https://analytics.getalloro.com';
 
@@ -420,11 +430,39 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
     }
   }
 
-  const project = hostname
+  let project = hostname
     ? await getProjectByHostname(hostname)
     : customDomain
       ? await getProjectByCustomDomain(customDomain)
       : null;
+
+  // Domain switch fallbacks — only reached when the verified lookup above
+  // missed, so a verified domain always resolves exactly as before.
+  // Host resolution is a DB query per request (nothing caches it by hostname),
+  // so a host becomes servable/redirecting the moment its row changes.
+  let servingPendingDomain = false;
+  if (!project && customDomain) {
+    const pending = await getProjectByPendingDomain(customDomain);
+    if (pending) {
+      // Serve the live site on the new domain before promotion. Canonical tags,
+      // sitemap and robots stay on the current verified host until promotion.
+      project = pending;
+      servingPendingDomain = true;
+    } else {
+      const target = await getDomainRedirectTarget(customDomain);
+      if (target) {
+        const targetHost = primaryPublicHost(target);
+        // targetHost comes from the project's current verified domain, which a
+        // redirect row can never equal (the verified lookup would have matched);
+        // the guard keeps that a hard no-loop guarantee.
+        if (targetHost !== customDomain) {
+          res.set('Cache-Control', `public, max-age=${DOMAIN_SWITCH_REDIRECT_MAX_AGE_SECONDS}`);
+          res.redirect(301, `https://${targetHost}${req.originalUrl}`);
+          return;
+        }
+      }
+    }
+  }
 
   if (!project) {
     // A host that WAS a site gets an explicit 410 Gone (deindex signal),
@@ -456,7 +494,9 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
   // is derived from the project's own domain fields, so it is always a host we
   // serve, and the `!==` guard makes this a no-op on the canonical host itself
   // (no loop). Runs before robots/sitemap so those unify onto the same host too.
-  if (customDomain && customDomain !== servingHost) {
+  // A pending domain is exempt: it must serve the site itself, not bounce to
+  // the current host, until promotion makes it the serving host.
+  if (customDomain && !servingPendingDomain && customDomain !== servingHost) {
     res.redirect(301, `https://${servingHost}${req.originalUrl}`);
     return;
   }

@@ -10,7 +10,12 @@ import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { getDb } from '../lib/db';
 import { getRedis } from '../lib/redis';
-import { getProjectByHostname, getProjectByCustomDomain } from '../services/project.service';
+import {
+  getProjectByHostname,
+  getProjectByCustomDomain,
+  getProjectByPendingDomain,
+  getDomainRedirectTarget,
+} from '../services/project.service';
 import {
   fetchReviewCount,
   fetchReviews,
@@ -63,7 +68,12 @@ setInterval(() => {
 async function resolveProject(hostname: string): Promise<Project | null> {
   const project = await getProjectByHostname(hostname);
   if (project) return project;
-  return getProjectByCustomDomain(hostname);
+  const verified = await getProjectByCustomDomain(hostname);
+  if (verified) return verified;
+  // Domain switch fallbacks (verified lookup first, unchanged): a pending domain
+  // and an old redirected domain both resolve to their live project, so
+  // pagination on a page loaded before a switch keeps working.
+  return (await getProjectByPendingDomain(hostname)) ?? (await getDomainRedirectTarget(hostname));
 }
 
 function clamp(value: number, min: number, max: number): number {
