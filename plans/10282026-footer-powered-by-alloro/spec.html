@@ -53,11 +53,11 @@
     <header class="spec-hero">
       <div class="hero-topline">
         <p class="eyebrow">Alloro Plan Spec</p>
-        <span class="status-pill status-pending">In Progress</span>
+        <span class="status-pill status-pending">Completed</span>
       </div>
       <h1>Footer "Website Powered by Alloro" credit on every site</h1>
       <dl class="meta-grid">
-        <div class="status-card"><dt>Status</dt><dd>In Progress</dd></div>
+        <div class="status-card"><dt>Status</dt><dd>Completed</dd></div>
         <div><dt>Plan Folder</dt><dd>plans/10282026-footer-powered-by-alloro</dd></div>
         <div><dt>Size</dt><dd>Small</dd></div>
         <div><dt>Risk</dt><dd>Level 2</dd></div>
@@ -116,6 +116,15 @@
         <li><input type="checkbox" checked disabled> Every live site without a credit gets exactly one; sites with one keep exactly one; getalloro.com gets none</li>
         <li><input type="checkbox" disabled> Manual: credit readable on a dark and a light footer after deploy</li>
       </ul>
+    </section>
+    <section class="spec-card" id="revision-log">
+      <h2>Revision Log</h2>
+      <article class="revision-entry">
+        <h3>Rev 1 - 2026-10-28</h3>
+        <p><strong>Change:</strong> PR getAlloro/website-renderer#23 merged at 5b33ec2 and deployed (run 40588540468, green). Live check: 17 of 18 live sites show exactly one credit; alloro.com shows none.</p>
+        <p><strong>Reason:</strong> Execution deviation: the "light footer" Done item cannot be checked yet, because every live footer is dark. It stays open until a light-footer site goes live.</p>
+        <p><strong>Updated Done criteria:</strong> none.</p>
+      </article>
     </section>
   </main>
 </body>
