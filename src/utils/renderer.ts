@@ -1,5 +1,6 @@
 import type { Section, SeoData } from '../types';
 import { schemaForServing } from './schemaServing';
+import { withAlloroCredit } from './alloro-credit';
 
 /**
  * Generates an inline <script> that auto-intercepts all forms on the page
@@ -257,10 +258,12 @@ export function renderPage(
   const mainContent = visibleSections
     .map((s) => stripFormArtifacts(stripHiddenElements(s.content)))
     .join('\n');
+  const cleanHeader = stripFormArtifacts(stripHiddenElements(header));
+  const cleanFooter = stripFormArtifacts(stripHiddenElements(footer));
   const pageContent = [
-    stripFormArtifacts(stripHiddenElements(header)),
+    cleanHeader,
     mainContent,
-    stripFormArtifacts(stripHiddenElements(footer)),
+    withAlloroCredit(cleanFooter, [cleanHeader, mainContent, cleanFooter].join('\n'), projectId),
   ].join('\n');
 
   if (!wrapper.includes('{{slot}}')) {

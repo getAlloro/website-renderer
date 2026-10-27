@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acceptance Tests</title>
+  <style>
+    :root { color-scheme: light; --paper:#fff; --ink:#080808; --muted:#5f5f5f; --line:#d8d8d8; --soft:#f5f5f5; --pass:#0a6b2e; --fail:#9b1c1c; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.5; }
+    .shell { width:min(960px,calc(100% - 32px)); margin:0 auto; padding:40px 0; }
+    .hero { border:1px solid var(--ink); border-radius:8px; padding:28px; margin-bottom:18px; }
+    .topline { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+    .eyebrow { margin:0; color:var(--muted); font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+    .pill { display:inline-flex; align-items:center; min-height:32px; padding:0 14px; border:1px solid var(--ink); border-radius:999px; font-size:.76rem; font-weight:800; text-transform:uppercase; background:var(--ink); color:#fff; }
+    .pill.passed { background:var(--pass); border-color:var(--pass); }
+    .pill.failed { background:var(--fail); border-color:var(--fail); }
+    h1 { margin:0 0 8px; font-size:clamp(1.8rem,4vw,2.6rem); line-height:1; }
+    .bar { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px; }
+    button { font:inherit; border:1px solid var(--ink); background:var(--paper); color:var(--ink); border-radius:8px; padding:8px 14px; font-weight:700; cursor:pointer; }
+    button:hover { background:var(--soft); }
+    .item { border:1px solid var(--line); border-radius:8px; padding:16px; margin:10px 0; }
+    .item.pass { border-left:4px solid var(--pass); }
+    .item.fail { border-left:4px solid var(--fail); }
+    .item h3 { margin:0 0 6px; font-size:1rem; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .tag { font-size:.66rem; font-weight:800; text-transform:uppercase; border:1px solid var(--line); border-radius:999px; padding:1px 8px; color:var(--muted); }
+    .item dt { color:var(--muted); font-size:.7rem; font-weight:700; text-transform:uppercase; margin-top:8px; }
+    .item ol { margin:4px 0 0 18px; padding:0; }
+    .st { font-weight:800; font-size:.72rem; text-transform:uppercase; }
+    .st.pass { color:var(--pass); } .st.fail { color:var(--fail); } .st.pending { color:var(--muted); }
+    .notice { border:1px dashed var(--line); border-radius:8px; padding:14px; background:var(--soft); font-size:.9rem; }
+    code { background:var(--soft); border:1px solid var(--line); border-radius:4px; padding:.05rem .3rem; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="topline">
+        <p class="eyebrow">Alloro Acceptance Tests · Layer 2</p>
+        <span class="pill" id="pill">Not Run</span>
+      </div>
+      <h1 id="title">Acceptance Tests</h1>
+      <p id="meta" class="eyebrow"></p>
+    </header>
+    <div class="bar">
+      <input type="file" id="file" accept="application/json" hidden>
+      <button id="load">Load results file</button>
+      <button id="download">Download updated results</button>
+    </div>
+    <div id="notice" class="notice" hidden></div>
+    <div id="list"></div>
+  </main>
+  <script>
+    let data = null;
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    const rollup = d => {
+      if (!d.items || !d.items.length) return "Not Run";
+      if (d.items.some(i => i.status === "fail" && !i.waiver)) return "Failed";
+      if (d.items.every(i => i.status === "pass" || (i.status === "fail" && i.waiver))) return "Passed";
+      if (d.items.some(i => i.status !== "pending")) return "In Progress";
+      return "Not Run";
+    };
+    function render() {
+      if (!data) return;
+      $("title").textContent = data.plan || "Acceptance Tests";
+      $("meta").textContent = "Plan: " + (data.plan || "—") + " · generated " + (data.generatedAt || "—");
+      const status = rollup(data); data.status = status;
+      const pill = $("pill"); pill.textContent = status; pill.className = "pill " + status.toLowerCase().replace(/\s/g, "");
+      $("list").innerHTML = (data.items || []).map((it, idx) => `
+        <div class="item ${it.status}">
+          <h3><input type="checkbox" data-i="${idx}" ${it.status === "pass" ? "checked" : ""}>
+            ${esc(it.title || it.id)} <span class="tag">${esc(it.surface || "")}</span>
+            <span class="st ${it.status}">${esc(it.status || "pending")}</span></h3>
+          <dl>
+            ${it.precondition ? `<dt>Precondition</dt><dd>${esc(it.precondition)}</dd>` : ""}
+            ${(it.steps && it.steps.length) ? `<dt>Steps</dt><ol>${it.steps.map(s => "<li>" + esc(s) + "</li>").join("")}</ol>` : ""}
+            ${it.expected ? `<dt>Expected</dt><dd>${esc(it.expected)}</dd>` : ""}
+            ${it.evidence ? `<dt>Evidence</dt><dd>${esc(it.evidence)}</dd>` : ""}
+            ${it.notes ? `<dt>Notes</dt><dd>${esc(it.notes)}</dd>` : ""}
+            ${it.waiver ? `<dt>Waiver</dt><dd>${esc(it.waiver)}</dd>` : ""}
+          </dl>
+        </div>`).join("");
+      $("list").querySelectorAll("input[type=checkbox]").forEach(cb =>
+        cb.addEventListener("change", e => { data.items[+e.target.dataset.i].status = e.target.checked ? "pass" : "pending"; render(); }));
+    }
+    function showNotice(msg) { const n = $("notice"); n.hidden = false; n.innerHTML = msg; }
+    $("load").addEventListener("click", () => $("file").click());
+    $("file").addEventListener("change", e => {
+      const f = e.target.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => { try { data = JSON.parse(r.result); $("notice").hidden = true; render(); } catch (err) { showNotice("Could not parse JSON: " + err.message); } };
+      r.readAsText(f);
+    });
+    $("download").addEventListener("click", () => {
+      if (!data) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      a.download = "test-results.json"; a.click();
+    });
+    fetch("./test-results.json").then(r => r.json()).then(d => { data = d; render(); })
+      .catch(() => showNotice("Couldn't auto-load <code>test-results.json</code> (browsers block this over <code>file://</code>). Click <b>Load results file</b> and pick it."));
+  </script>
+</body>
+</html>

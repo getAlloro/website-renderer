@@ -1,0 +1,40 @@
+{
+  "plan": "plans/10282026-footer-powered-by-alloro",
+  "generatedAt": "2026-10-28",
+  "status": "In Progress",
+  "items": [
+    {
+      "id": "T1",
+      "title": "Every live site renders exactly one credit; getalloro.com renders none",
+      "surface": "cli",
+      "precondition": "Read-only export of the 18 LIVE, non-archived projects (wrapper, header, footer, home page sections) from production on 2026-10-28",
+      "steps": ["1. Run renderPage() from this branch on each exported site", "2. Count 'Powered by ... Alloro' matches, excluding the Alloro Protect form badge"],
+      "expected": "17 sites show 1 credit; alloro.com (project acc7cbfc) shows 0; the 5 sites with a saved credit get no second one",
+      "status": "pass",
+      "evidence": "12 injected inside </footer>, 5 kept their saved credit, alloro.com 0. No page had 2.",
+      "notes": "Home page only. operation-honor-rural-salute has a credit in content on another page; that page keeps it and gets no footer credit."
+    },
+    {
+      "id": "T2",
+      "title": "Credit is readable on the footer it lands in",
+      "surface": "ui",
+      "precondition": "Rendered HTML from T1, opened in a browser",
+      "steps": ["1. Open each injected site", "2. Read the credit's text color and the nearest background color", "3. Check the logo loads"],
+      "expected": "Text takes the footer's color, full-width block, logo loads",
+      "status": "pass",
+      "evidence": "All 12: light text on dark footer, full width, logo loaded. Screenshot of robison-orthodontics taken locally.",
+      "notes": "All current live footers are dark. A light footer is not yet live to check."
+    },
+    {
+      "id": "T3",
+      "title": "Credit shows on the deployed renderer",
+      "surface": "ui",
+      "precondition": "PR merged and renderer deployed; render cache expired or busted",
+      "steps": ["1. Open robison-orthodontics and anewveteran.org live", "2. Scroll to the footer", "3. Open alloro.com and check the footer"],
+      "expected": "Credit visible on both client sites; none on alloro.com",
+      "status": "pending",
+      "evidence": "",
+      "notes": "Needs the deploy."
+    }
+  ]
+}
