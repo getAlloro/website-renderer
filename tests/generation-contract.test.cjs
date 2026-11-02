@@ -14,7 +14,7 @@ const redis = require('../dist/lib/redis');
 const { resolvePostBlocks } = require('../dist/services/postblock.service');
 const site = require('../dist/routes/site');
 const { worktreeGenerationPreviewRoute } = require('../dist/routes/generation-preview');
-const original = { pinned: GenerationRenderModel.findPinned, runs: GenerationRenderModel.publishedRunIds,
+const original = { pinned: GenerationRenderModel.findPinned, runs: GenerationRenderModel.publishedRunIds, script: GenerationRenderModel.findPinnedScript,
   candidate: GenerationRenderModel.findCandidateArtifact, privateRun: GenerationRenderModel.findPrivateRun, singlePost: singlePosts.getSinglePostData,
   privatePage: GenerationRenderModel.findPrivatePage, block: ProjectPostBlockModel.findPinned,
   db: database.getDb, redis: redis.getRedis, assemble: site.assembleHtml };
@@ -24,6 +24,7 @@ const wrapper = `<html data-generation-contract="1"><head><style data-alloro-gen
 const project = { id: 'project-1', organization_id: 12, wrapper: 'LEGACY', header: 'OLD', footer: 'OLD' };
 let payload;
 beforeEach(() => {
+  GenerationRenderModel.findPinnedScript = async () => [];
   GenerationRenderModel.findCandidateArtifact = original.candidate;
   GenerationRenderModel.findPrivateRun = original.privateRun;
   GenerationRenderModel.findPrivatePage = original.privatePage;
@@ -35,7 +36,7 @@ beforeEach(() => {
     return [{ payload, content_hash: generationArtifactHash(payload) }];
   };
 });
-after(() => { GenerationRenderModel.findPinned = original.pinned; GenerationRenderModel.publishedRunIds = original.runs;
+after(() => { GenerationRenderModel.findPinned = original.pinned; GenerationRenderModel.publishedRunIds = original.runs; GenerationRenderModel.findPinnedScript = original.script;
   GenerationRenderModel.findCandidateArtifact = original.candidate; GenerationRenderModel.findPrivateRun = original.privateRun; singlePosts.getSinglePostData = original.singlePost;
   GenerationRenderModel.findPrivatePage = original.privatePage; ProjectPostBlockModel.findPinned = original.block;
   database.getDb = original.db; redis.getRedis = original.redis; site.assembleHtml = original.assemble; });
@@ -305,4 +306,20 @@ test('private preview is local-only and retains navigable per-run page links', a
     assert.ok(body.includes(`/__worktree/generation/${projectId}/${runId}?path=%2Fabout#team`));
     assert.ok(body.includes('href="https://other.example/"')); assert.equal(inspectGenerationStyle(body).cssHash, styleHash);
   } finally { if (previous === undefined) delete process.env.ALLORO_WORKTREE_TEST_MODE; else process.env.ALLORO_WORKTREE_TEST_MODE = previous; }
+});
+
+test('an operator-pinned site script is appended after the footer when its hashes match, and refused when tampered', async () => {
+  const script = "document.querySelectorAll('[data-carousel]').forEach(r => r.dataset.ready = '1');";
+  const scriptHash = createHash('sha256').update(script).digest('hex');
+  const scriptPayload = { runId: 'run-1', script, scriptHash };
+  GenerationRenderModel.findPinnedScript = async () => [{ payload: scriptPayload, content_hash: generationArtifactHash(scriptPayload) }];
+  const resolved = await resolveGenerationRender(project, { generation_run_id: 'run-1' });
+  assert.equal(resolved.footer, `<footer>Confirmed reach</footer><script data-alloro-generation-script="1" data-content-hash="${scriptHash}">${script}</script>`);
+  GenerationRenderModel.findPinnedScript = async () => [{ payload: { ...scriptPayload, script: script + ' /* edited */' }, content_hash: generationArtifactHash(scriptPayload) }];
+  await assert.rejects(resolveGenerationRender(project, { generation_run_id: 'run-1' }), /GENERATION_SCRIPT_HASH_MISMATCH/);
+  GenerationRenderModel.findPinnedScript = async () => [{ payload: scriptPayload, content_hash: generationArtifactHash(scriptPayload) }, { payload: scriptPayload, content_hash: 'x' }];
+  await assert.rejects(resolveGenerationRender(project, { generation_run_id: 'run-1' }), /GENERATION_SCRIPT_AMBIGUOUS/);
+  GenerationRenderModel.findPinnedScript = async () => [];
+  const plain = await resolveGenerationRender(project, { generation_run_id: 'run-1' });
+  assert.equal(plain.footer, '<footer>Confirmed reach</footer>');
 });

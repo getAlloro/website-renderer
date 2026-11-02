@@ -1,5 +1,6 @@
 import type { Page, Project, Section } from '../types';
 import { GenerationRenderModel, type GenerationCandidateArtifact } from '../models/GenerationRenderModel';
+import { createHash } from 'node:crypto';
 import { generationArtifactHash, inspectGenerationStyle } from '../utils/generation-style';
 import { generationReadinessMarker } from '../utils/generation-readiness';
 
@@ -108,10 +109,31 @@ async function pinnedArtifact(project: Project, runId: string): Promise<RenderAr
   return artifact as unknown as RenderArtifact;
 }
 
+/**
+ * The run's operator-pinned site script as an inline tag, or an empty string. Alloro pins it with `site-generator save-script`
+ * (never from the agent); the payload carries the script's own sha256, and the row's content hash covers the payload, so a
+ * script that was altered in the table is refused rather than served. Two rows are ambiguous and refused too.
+ */
+async function pinnedScriptTag(project: Project, runId: string): Promise<string> {
+  if (!project.organization_id) return '';
+  const rows = await GenerationRenderModel.findPinnedScript(project.id, project.organization_id, runId);
+  if (!rows.length) return '';
+  if (rows.length !== 1) throw new Error('GENERATION_SCRIPT_AMBIGUOUS');
+  const payload: unknown = typeof rows[0].payload === 'string' ? JSON.parse(rows[0].payload) : rows[0].payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('GENERATION_SCRIPT_INVALID');
+  const artifact = payload as Record<string, unknown>;
+  if (artifact.runId !== runId || typeof artifact.script !== 'string' || typeof artifact.scriptHash !== 'string'
+    || generationArtifactHash(artifact) !== rows[0].content_hash
+    || createHash('sha256').update(artifact.script).digest('hex') !== artifact.scriptHash
+    || /<\/script|<!--/i.test(artifact.script)) throw new Error('GENERATION_SCRIPT_HASH_MISMATCH');
+  return `<script data-alloro-generation-script="1" data-content-hash="${artifact.scriptHash}">${artifact.script}</script>`;
+}
+
 export async function resolveGenerationRender(project: Project, page: Pick<Page, 'generation_run_id'>): Promise<Project> {
   if (!page.generation_run_id) return project;
   const artifact = await pinnedArtifact(project, page.generation_run_id);
-  return { ...project, wrapper: artifact.wrapper, header: artifact.header, footer: artifact.footer };
+  const script = await pinnedScriptTag(project, page.generation_run_id);
+  return { ...project, wrapper: artifact.wrapper, header: artifact.header, footer: artifact.footer + script };
 }
 
 /** Only the exact published native page receives a readiness marker; candidates/legacy never do. */
