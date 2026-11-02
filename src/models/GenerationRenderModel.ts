@@ -45,6 +45,16 @@ export class GenerationRenderModel {
       .whereIn('status', ['draft', 'published']).orderBy('version', 'desc').limit(1) as Page[];
     return pages.length ? { project, page: pages[0] } : null;
   }
+  /** The run's operator-pinned site script, if any (Alloro `site-generator save-script`). At most one row is valid. */
+  static async findPinnedScript(projectId: string, organizationId: number, runId: string): Promise<Array<{ payload: unknown; content_hash: string }>> {
+    return getDb()('generation_artifacts as artifact')
+      .join('generation_runs as run', function () {
+        this.on('run.id', 'artifact.run_id').andOn('run.project_id', 'artifact.project_id').andOn('run.organization_id', 'artifact.organization_id');
+      })
+      .where({ 'artifact.project_id': projectId, 'artifact.organization_id': organizationId,
+        'artifact.run_id': runId, 'artifact.kind': 'publication_snapshot', 'artifact.artifact_key': 'site-script' })
+      .select('artifact.payload', 'artifact.content_hash').limit(2);
+  }
   /** No fallback to another run or project's mutable chrome. At most one revision can match. */
   static async findPinned(projectId: string, organizationId: number, runId: string): Promise<Array<{ payload: unknown; content_hash: string }>> {
     return getDb()('generation_artifacts as artifact')
