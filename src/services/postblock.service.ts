@@ -16,6 +16,7 @@ import { getPaginationScript } from '../utils/pagination-client';
 import type { Section } from '../types';
 import crypto from 'crypto';
 import { emptyShortcodeState } from '../utils/empty-shortcode-state';
+import { ProjectPostBlockModel } from '../models/ProjectPostBlockModel';
 
 const POST_BLOCK_TTL = 300; // 5 minutes
 const POSTS_TTL = 120; // 2 minutes
@@ -334,7 +335,8 @@ export async function resolvePostBlocks(
 
   await Promise.all(
     uniqueBlockSlugs.map(async (slug) => {
-      const block = await fetchPostBlock(templateId, slug);
+      const block = slug.startsWith('project:') ? await ProjectPostBlockModel.findPinned(projectId, slug) : await fetchPostBlock(templateId, slug);
+      if (!block && slug.startsWith('project:')) throw new Error('PROJECT_BLOCK_REVISION_MISSING');
       if (block) blockMap.set(slug, block);
     })
   );
@@ -352,6 +354,7 @@ export async function resolvePostBlocks(
       result = result.replace(shortcode.raw, '');
       continue;
     }
+    if (shortcode.id.startsWith('project:') && block.post_type_slug !== shortcode.items) throw new Error('PROJECT_BLOCK_TYPE_MISMATCH');
 
     // For paginated mode, override limit/offset to fetch only the first page
     const isPaginated = shortcode.paginate !== 'none';

@@ -18,6 +18,8 @@ import { pageNotFoundPage } from '../templates/page-not-found';
 import { successPage } from '../templates/success-page';
 import { renderPage, normalizeSections, injectSeoMeta } from '../utils/renderer';
 import { resolvePostBlocks } from '../services/postblock.service';
+import { resolveGenerationRender, resolveGenerationSinglePost, generationPublishedReadinessMarker, generationPostReadinessMarker } from '../services/generation-render.service';
+import { GENERATION_READY_HEADER } from '../utils/generation-readiness';
 import { resolveMenus } from '../services/menu.service';
 import { resolveReviewBlocks } from '../services/review.service';
 import { resolveFormBlocks } from '../services/form.service';
@@ -26,7 +28,7 @@ import { renderPostBlockHtml } from '../utils/shortcodes';
 import { processTailwindCSS } from '../utils/tailwind';
 import { localizeVersionedImports } from '../utils/versionedImports';
 import { getApiBaseUrl } from '../lib/apiBaseUrl';
-import type { Project, Page, SeoData } from '../types';
+import type { Project, Page, SeoData, Section } from '../types';
 import { getDb } from '../lib/db';
 import { getRedis } from '../lib/redis';
 
@@ -134,7 +136,12 @@ async function getIntegrationScripts(projectId: string, html: string): Promise<s
   }
 }
 
-async function assembleHtml(project: Project, page: Page, servingHost: string): Promise<string> {
+export async function assembleHtml(project: Project, page: Page, servingHost: string): Promise<string> {
+  return assembleResolvedHtml(await resolveGenerationRender(project, page), page, servingHost);
+}
+
+/** Shared assembly after the caller has resolved a validated canonical or private candidate revision. */
+export async function assembleResolvedHtml(project: Project, page: Pick<Page, 'id' | 'path' | 'sections' | 'status' | 'seo_data'>, servingHost: string): Promise<string> {
   const db = getDb();
 
   // Fetch template snippets (if project has template)
@@ -299,11 +306,26 @@ function formatDateStr(dateStr: string | Date | null): string {
 /**
  * Assemble HTML for a single post page using the post type's single_template.
  */
-async function assembleSinglePostHtml(
+export async function assembleSinglePostHtml(
   project: Project,
   postType: any,
   post: any,
-  servingHost: string
+  servingHost: string,
+  privateRunId?: string,
+): Promise<string> {
+  const generated = await resolveGenerationSinglePost(project, postType.id, privateRunId);
+  const sections = generated.sections ?? (Array.isArray(postType.single_template) && postType.single_template.length > 0
+    ? postType.single_template
+    : DEFAULT_SINGLE_TEMPLATE);
+  return assembleResolvedSinglePostHtml(generated.project, postType, post, servingHost, sections);
+}
+
+type SinglePostData = NonNullable<Awaited<ReturnType<typeof getSinglePostData>>>;
+
+/** Candidate callers supply an exact saved layout; only the canonical wrapper above may choose a legacy default. */
+export async function assembleResolvedSinglePostHtml(
+  project: Project, postType: SinglePostData['postType'], post: SinglePostData['post'],
+  servingHost: string, sections: Section[],
 ): Promise<string> {
   const db = getDb();
 
@@ -318,11 +340,6 @@ async function assembleSinglePostHtml(
     .orderBy('order_index', 'asc');
 
   const mergedSnippets = mergeCodeSnippets(templateSnippets, projectSnippets);
-
-  // Use single_template from post type, or default
-  const sections = Array.isArray(postType.single_template) && postType.single_template.length > 0
-    ? postType.single_template
-    : DEFAULT_SINGLE_TEMPLATE;
 
   // Parse custom_fields
   let customFields: Record<string, unknown> = {};
@@ -578,7 +595,12 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
         segments[1]
       );
       if (singlePost) {
+        const readiness = await generationPostReadinessMarker(project, singlePost.postType.id, singlePost.post.id, pagePath);
         const html = await assembleSinglePostHtml(project, singlePost.postType, singlePost.post, servingHost);
+        if (readiness) {
+          if (readiness !== await generationPostReadinessMarker(project, singlePost.postType.id, singlePost.post.id, pagePath)) throw new Error('GENERATION_READINESS_CHANGED_DURING_RENDER');
+          res.set(GENERATION_READY_HEADER, readiness).set('Cache-Control', 'no-store');
+        }
         res.type('html').send(html);
         return;
       }
@@ -599,6 +621,11 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  const readiness = await generationPublishedReadinessMarker(project, page);
   const html = await assembleHtml(project, page, servingHost);
+  if (readiness) {
+    if (readiness !== await generationPublishedReadinessMarker(project, page)) throw new Error('GENERATION_READINESS_CHANGED_DURING_RENDER');
+    res.set(GENERATION_READY_HEADER, readiness).set('Cache-Control', 'no-store');
+  }
   res.type('html').send(html);
 }
