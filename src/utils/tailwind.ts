@@ -7,6 +7,7 @@ const { compile: twCompile, optimize: twOptimize } = require('@tailwindcss/node'
 import { createHash } from 'crypto';
 import path from 'path';
 import { getRedis } from '../lib/redis';
+import { inspectGenerationStyle } from './generation-style';
 
 const CACHE_TTL = 60 * 60 * 24; // 24 hours
 const CACHE_PREFIX = 'tw:';
@@ -185,6 +186,12 @@ export async function processTailwindCSS(
 ): Promise<string> {
   // Always strip any existing Play CDN scripts first
   let result = stripPlayCDN(html);
+
+  const generated = inspectGenerationStyle(result);
+  if (generated.present) {
+    if (!generated.valid) throw new Error('GENERATION_STYLE_REVISION_INVALID');
+    return result;
+  }
 
   if (isDraft) {
     // Draft: inject Play CDN for real-time editing

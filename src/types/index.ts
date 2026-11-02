@@ -65,6 +65,7 @@ export interface Page {
   version: number;
   status: PageStatus;
   generation_status: PageGenerationStatus;
+  generation_run_id?: string | null;
   template_page_id: string | null;
   page_type: PageType;
   artifact_s3_prefix: string | null;
