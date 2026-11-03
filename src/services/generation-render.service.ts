@@ -162,6 +162,23 @@ export async function generationPostReadinessMarker(project: Project, postTypeId
     dependencies: await GenerationRenderModel.readinessDependencies(project.id, project.organization_id) });
 }
 
+/**
+ * A generated project with no wrapper of its own and no generated detail layout for this post type still renders its
+ * single post inside its site chrome: the run that drew the published home page, or the only published run, with that
+ * run's pinned site script. A project with its own wrapper, or chrome that cannot be chosen without guessing, is
+ * returned unchanged (today's behaviour). Keystone sites need this: their singles come from the template
+ * (alloro plans/11032026-keystone-house-template, T2b).
+ */
+async function generatedChromeFallback(project: Project, runIds: string[], artifacts: RenderArtifact[]): Promise<Project> {
+  if (project.wrapper || !artifacts.length) return project;
+  const homeRunId = runIds.length === 1 ? runIds[0] : await GenerationRenderModel.homePageRunId(project.id);
+  const index = homeRunId ? runIds.indexOf(homeRunId) : -1;
+  if (index === -1) return project;
+  const chrome = artifacts[index];
+  const script = await pinnedScriptTag(project, runIds[index]);
+  return { ...project, wrapper: chrome.wrapper, header: chrome.header, footer: chrome.footer + script };
+}
+
 /** Detail URLs bind only to reviewed runs referenced by published pages, never the newest draft run. */
 export async function resolveGenerationSinglePost(project: Project, postTypeId: string, privateRunId?: string): Promise<{
   project: Project; sections: Array<{ name: string; content: string }> | null;
@@ -170,7 +187,7 @@ export async function resolveGenerationSinglePost(project: Project, postTypeId: 
   const artifacts = await Promise.all(runIds.map(runId => pinnedArtifact(project, runId)));
   const candidates = artifacts.flatMap(artifact => (artifact.singlePostLayouts ?? []).filter(layout => layout.postTypeId === postTypeId)
     .map(layout => ({ project: { ...project, wrapper: artifact.wrapper, header: artifact.header, footer: artifact.footer }, sections: layout.sections })));
-  if (!candidates.length) return { project, sections: null };
+  if (!candidates.length) return { project: await generatedChromeFallback(project, runIds, artifacts), sections: null };
   const hashes = new Set(candidates.map(candidate => generationArtifactHash({ wrapper: candidate.project.wrapper,
     header: candidate.project.header, footer: candidate.project.footer, sections: candidate.sections })));
   if (hashes.size !== 1) throw new Error('GENERATION_SINGLE_POST_LAYOUT_AMBIGUOUS');
