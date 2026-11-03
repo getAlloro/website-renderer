@@ -37,6 +37,24 @@ function buildFormScript(projectId: string, apiBase: string): string {
       window.sessionStorage.setItem('_alloro_ft',JSON.stringify(_ft));
     }
   }catch(_e){_ft=null;}
+  // Badge text colour, picked from the real background behind the form so it
+  // meets WCAG AA (4.5:1 for small text): soft grey when it passes, else black or white.
+  function alloroBadgeColor(el){
+    var bg=null;
+    while(el&&el.nodeType===1){
+      var c=window.getComputedStyle(el).backgroundColor||'';
+      var m=c.match(/[0-9.]+/g);
+      if(m&&m.length>=3&&(m.length<4||parseFloat(m[3])>=0.5)){bg=m;break;}
+      el=el.parentElement;
+    }
+    if(!bg)return '#57534E';
+    function lin(v){v=v/255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);}
+    var L=0.2126*lin(+bg[0])+0.7152*lin(+bg[1])+0.0722*lin(+bg[2]);
+    if((L+0.05)/(0.0876+0.05)>=4.5)return '#57534E';
+    if((0.6549+0.05)/(L+0.05)>=4.5)return '#D6D3D1';
+    // Mid-tone background: plain black or white always clears 4.5:1.
+    return (L+0.05)/0.05>=1.05/(L+0.05)?'#000000':'#FFFFFF';
+  }
   document.addEventListener('DOMContentLoaded',function(){
     var API='${apiBase}';
     var PID='${projectId}';
@@ -48,20 +66,21 @@ function buildFormScript(projectId: string, apiBase: string): string {
       hp.style.cssText='position:absolute;left:-9999px;opacity:0;height:0;width:0;overflow:hidden;';
       form.appendChild(hp);
       var badge=document.createElement('a');
-      badge.href='https://getalloro.com/alloro-protect';
+      badge.href='https://www.alloro.com/alloro-protect';
       badge.target='_blank';badge.rel='noopener noreferrer';
       badge.style.cssText='display:flex;align-items:center;justify-content:center;gap:4px;margin-top:8px;text-decoration:none;';
-      var dColor='rgba(0,0,0,0.25)';var hColor='rgba(214,104,83,0.65)';
-      badge.onmouseenter=function(){lbl.style.color=hColor;lbl.style.textShadow='0 1px 2px rgba(214,104,83,0.2)';path.style.fill=hColor;};
-      badge.onmouseleave=function(){lbl.style.color=dColor;lbl.style.textShadow='0 1px 1px rgba(0,0,0,0.1)';path.style.fill=dColor;};
+      var dColor=alloroBadgeColor(form.parentNode);
+      badge.onmouseenter=function(){lbl.style.textDecoration='underline';};
+      badge.onmouseleave=function(){lbl.style.textDecoration='none';};
+      badge.onfocus=badge.onmouseenter;badge.onblur=badge.onmouseleave;
       var svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
-      svg.setAttribute('width','12');svg.setAttribute('height','12');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');
+      svg.setAttribute('width','12');svg.setAttribute('height','12');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('aria-hidden','true');
       var path=document.createElementNS('http://www.w3.org/2000/svg','path');
-      path.setAttribute('d','M12 2l7 4v5c0 5.25-3.5 10-7 12-3.5-2-7-6.75-7-12V6l7-4z');path.style.fill=dColor;path.style.transition='fill 0.2s ease';
+      path.setAttribute('d','M12 2l7 4v5c0 5.25-3.5 10-7 12-3.5-2-7-6.75-7-12V6l7-4z');path.style.fill=dColor;
       svg.appendChild(path);
       var lbl=document.createElement('span');
       lbl.textContent='Powered by Alloro Protect\\u2122';
-      lbl.style.cssText='font-size:11px;color:'+dColor+';font-family:system-ui,sans-serif;text-shadow:0 1px 1px rgba(0,0,0,0.1);transition:color 0.2s ease,text-shadow 0.2s ease;';
+      lbl.style.cssText='font-size:12px;line-height:1.4;color:'+dColor+';font-family:system-ui,sans-serif;text-underline-offset:2px;';
       badge.appendChild(svg);badge.appendChild(lbl);
       form.parentNode.insertBefore(badge,form.nextSibling);
       form.addEventListener('submit',function(e){
@@ -206,7 +225,7 @@ function injectCodeSnippets(
 function stripFormArtifacts(html: string): string {
   return html
     .replace(/<input[^>]*name="website_url"[^>]*tabindex="-1"[^>]*>/gi, '')
-    .replace(/<a[^>]*href="https:\/\/getalloro\.com\/alloro-protect"[^>]*>[\s\S]*?<\/a>/gi, '');
+    .replace(/<a[^>]*href="https:\/\/(?:www\.)?(?:getalloro|alloro)\.com\/alloro-protect"[^>]*>[\s\S]*?<\/a>/gi, '');
 }
 
 /**
