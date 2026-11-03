@@ -14,7 +14,7 @@ const redis = require('../dist/lib/redis');
 const { resolvePostBlocks } = require('../dist/services/postblock.service');
 const site = require('../dist/routes/site');
 const { worktreeGenerationPreviewRoute } = require('../dist/routes/generation-preview');
-const original = { pinned: GenerationRenderModel.findPinned, runs: GenerationRenderModel.publishedRunIds, script: GenerationRenderModel.findPinnedScript,
+const original = { pinned: GenerationRenderModel.findPinned, runs: GenerationRenderModel.publishedRunIds, home: GenerationRenderModel.homePageRunId, script: GenerationRenderModel.findPinnedScript,
   candidate: GenerationRenderModel.findCandidateArtifact, privateRun: GenerationRenderModel.findPrivateRun, singlePost: singlePosts.getSinglePostData,
   privatePage: GenerationRenderModel.findPrivatePage, block: ProjectPostBlockModel.findPinned,
   db: database.getDb, redis: redis.getRedis, assemble: site.assembleHtml };
@@ -36,7 +36,7 @@ beforeEach(() => {
     return [{ payload, content_hash: generationArtifactHash(payload) }];
   };
 });
-after(() => { GenerationRenderModel.findPinned = original.pinned; GenerationRenderModel.publishedRunIds = original.runs; GenerationRenderModel.findPinnedScript = original.script;
+after(() => { GenerationRenderModel.findPinned = original.pinned; GenerationRenderModel.publishedRunIds = original.runs; GenerationRenderModel.homePageRunId = original.home; GenerationRenderModel.findPinnedScript = original.script;
   GenerationRenderModel.findCandidateArtifact = original.candidate; GenerationRenderModel.findPrivateRun = original.privateRun; singlePosts.getSinglePostData = original.singlePost;
   GenerationRenderModel.findPrivatePage = original.privatePage; ProjectPostBlockModel.findPinned = original.block;
   database.getDb = original.db; redis.getRedis = original.redis; site.assembleHtml = original.assemble; });
@@ -288,6 +288,23 @@ test('conflicting published detail bindings fail closed; unreferenced draft runs
   GenerationRenderModel.publishedRunIds = async () => [];
   assert.equal((await resolveGenerationSinglePost(project, 'type')).project, project);
   assert.ok((await resolveGenerationSinglePost(project, 'type', 'run-2')).project.header.includes('run-2'));
+});
+test('a generated project without a wrapper renders a template single inside its home run chrome (Keystone T2b)', async () => {
+  const bare = { ...project, wrapper: null, header: null, footer: null };
+  GenerationRenderModel.publishedRunIds = async () => ['run-1'];
+  delete payload.singlePostLayouts;
+  const solo = await resolveGenerationSinglePost(bare, 'post-type');
+  assert.equal(solo.sections, null); assert.ok(solo.project.header.includes('Confirmed brand')); assert.equal(inspectGenerationStyle(solo.project.wrapper).cssHash, styleHash);
+  GenerationRenderModel.publishedRunIds = async () => ['run-1', 'run-2'];
+  GenerationRenderModel.findPinned = async (_project, _org, runId) => {
+    const artifact = { ...payload, runId, header: `<header>${runId}</header>` };
+    return [{ payload: artifact, content_hash: generationArtifactHash(artifact) }];
+  };
+  GenerationRenderModel.homePageRunId = async id => { assert.equal(id, bare.id); return 'run-2'; };
+  assert.ok((await resolveGenerationSinglePost(bare, 'post-type')).project.header.includes('run-2'));
+  GenerationRenderModel.homePageRunId = async () => null;
+  assert.equal((await resolveGenerationSinglePost(bare, 'post-type')).project, bare);
+  assert.equal((await resolveGenerationSinglePost(project, 'post-type')).project, project);
 });
 test('private preview is local-only and retains navigable per-run page links', async () => {
   const previous = process.env.ALLORO_WORKTREE_TEST_MODE;

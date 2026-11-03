@@ -31,6 +31,13 @@ export class GenerationRenderModel {
     return rows.map(row => row.generation_run_id);
   }
 
+  /** The run that drew the published home page: the site's chrome when a generated project has no wrapper of its own. */
+  static async homePageRunId(projectId: string): Promise<string | null> {
+    const row = await getDb()('pages').where({ project_id: projectId, status: 'published', path: '/' })
+      .whereNotNull('generation_run_id').first('generation_run_id') as { generation_run_id: string } | undefined;
+    return row?.generation_run_id ?? null;
+  }
+
   static async findPrivateRun(projectId: string, runId: string): Promise<Project | null> {
     const project = await getDb()('projects').where({ id: projectId }).whereNull('archived_at').first<Project>();
     if (!project?.organization_id) return null;
