@@ -19,7 +19,7 @@ const EXISTING_CREDIT_PATTERN = /powered\s+by(?:\s|<[^>]*>)*alloro(?!(?:\s|<[^>]
 // Inline styles only: sites do not share a stylesheet, and color: inherit takes
 // the footer's own text color so the credit reads on light and dark footers.
 const CREDIT_HTML = `<div data-alloro-credit style="width:100%;padding:16px 24px;text-align:center;font-size:12px;line-height:16px;">
-  <a href="https://www.getalloro.com" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;color:inherit;opacity:0.6;text-decoration:none;">
+  <a href="https://www.alloro.com" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:8px;color:inherit;opacity:0.6;text-decoration:none;">
     <img src="https://app.getalloro.com/logo.png" alt="" style="height:16px;width:auto;">
     <span>Website Powered by Alloro</span>
   </a>
