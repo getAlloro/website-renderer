@@ -9,7 +9,8 @@ import {
 } from '../services/project.service';
 import { getPageToRender, hasPublishedPages, getArtifactPageByPrefix, isArtifactPath } from '../services/page.service';
 import { fetchArtifactIndexHtml, fetchArtifactAsset } from '../services/artifact.service';
-import { getSinglePostData } from '../services/singlepost.service';
+import { getSinglePostData, getPickedLayoutSections } from '../services/singlepost.service';
+import { pickSingleSections } from '../utils/singlePostLayout';
 import { buildSitemapXml, buildRobotsTxt, primaryPublicHost } from '../services/sitemap.service';
 import { siteNotFoundPage } from '../templates/site-not-found';
 import { siteNotReadyPage } from '../templates/site-not-ready';
@@ -314,9 +315,11 @@ export async function assembleSinglePostHtml(
   privateRunId?: string,
 ): Promise<string> {
   const generated = await resolveGenerationSinglePost(project, postType.id, privateRunId);
-  const sections = generated.sections ?? (Array.isArray(postType.single_template) && postType.single_template.length > 0
-    ? postType.single_template
-    : DEFAULT_SINGLE_TEMPLATE);
+  // A generated run's own layout wins; otherwise the site's picked page layout, then the
+  // post type's Default, then the built-in layout (plans/10162026-single-post-layouts, Slice 2).
+  const sections = generated.sections
+    ?? pickSingleSections(await getPickedLayoutSections(project, postType.slug), postType.single_template).sections
+    ?? DEFAULT_SINGLE_TEMPLATE;
   return assembleResolvedSinglePostHtml(generated.project, postType, post, servingHost, sections);
 }
 
