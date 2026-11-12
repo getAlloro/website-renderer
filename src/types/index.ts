@@ -49,6 +49,8 @@ export interface Project {
   step_image_analysis: Array<{ s3Url: string; description: string }> | null;
   primary_color: string | null;
   template_id: string | null;
+  /** Each post type's picked page layout, e.g. { "articles": "editorial" }; missing = Default. */
+  single_layouts?: Record<string, unknown> | string | null;
   archived_at: Date | string | null;
   created_at: Date;
   updated_at: Date;

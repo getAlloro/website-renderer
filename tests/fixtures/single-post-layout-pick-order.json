@@ -1,0 +1,149 @@
+{
+  "about": "Which sections a single post page renders. One copy lives in getAlloro/website-renderer (tests/fixtures) and an identical copy in getAlloro/alloro (src/__tests__/fixtures); both suites read it, so the two pick orders cannot drift apart. picks = projects.single_layouts as stored; layouts = the layouts of the site's family for this post type, by slug; expect.choice = the slug read from picks (null = Default); expect.source = layout | default | builtin.",
+  "cases": [
+    {
+      "name": "no pick gives Default",
+      "picks": {},
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": null, "source": "default" }
+    },
+    {
+      "name": "a pick with sections gives that layout",
+      "picks": { "doctors": "hero" },
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": "hero", "source": "layout" }
+    },
+    {
+      "name": "a pick for another post type leaves this one on Default",
+      "picks": { "team": "hero" },
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": null, "source": "default" }
+    },
+    {
+      "name": "a pick of a layout that does not exist gives Default",
+      "picks": { "doctors": "gone" },
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": "gone", "source": "default" }
+    },
+    {
+      "name": "a pick of a layout with no sections gives Default",
+      "picks": { "doctors": "blank" },
+      "postType": "doctors",
+      "layouts": { "blank": [] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": "blank", "source": "default" }
+    },
+    {
+      "name": "a layout whose sections hold no content gives Default",
+      "picks": { "doctors": "hollow" },
+      "postType": "doctors",
+      "layouts": { "hollow": [{ "name": "hollow" }, null, "text"] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": "hollow", "source": "default" }
+    },
+    {
+      "name": "unusable entries are skipped and the usable ones kept",
+      "picks": { "doctors": "mixed" },
+      "postType": "doctors",
+      "layouts": { "mixed": [{ "name": "broken" }, { "content": "<section>KEPT</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": "mixed", "source": "layout", "sections": [{ "name": "single-post", "content": "<section>KEPT</section>" }] }
+    },
+    {
+      "name": "picking default means Default",
+      "picks": { "doctors": "default" },
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": null, "source": "default" }
+    },
+    {
+      "name": "a pick that is not text means Default",
+      "picks": { "doctors": 7 },
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": null, "source": "default" }
+    },
+    {
+      "name": "a pick that is not a slug means Default",
+      "picks": { "doctors": "Hero Page" },
+      "postType": "doctors",
+      "layouts": { "Hero Page": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": null, "source": "default" }
+    },
+    {
+      "name": "picks stored as JSON text are read",
+      "picks": "{\"doctors\":\"hero\"}",
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": "hero", "source": "layout" }
+    },
+    {
+      "name": "unreadable picks mean Default",
+      "picks": "{not json",
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": null, "source": "default" }
+    },
+    {
+      "name": "picks that are a list mean Default",
+      "picks": ["hero"],
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": null, "source": "default" }
+    },
+    {
+      "name": "no picks at all (the column not there yet) mean Default",
+      "picks": null,
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": null, "source": "default" }
+    },
+    {
+      "name": "layout sections stored as JSON text are read",
+      "picks": { "doctors": "hero" },
+      "postType": "doctors",
+      "layouts": { "hero": "[{\"name\":\"hero\",\"content\":\"<section>HERO</section>\"}]" },
+      "defaultSections": [{ "name": "single-post", "content": "<article>DEFAULT</article>" }],
+      "expect": { "choice": "hero", "source": "layout" }
+    },
+    {
+      "name": "an empty Default and no pick give the built-in layout",
+      "picks": {},
+      "postType": "doctors",
+      "layouts": {},
+      "defaultSections": [],
+      "expect": { "choice": null, "source": "builtin" }
+    },
+    {
+      "name": "a broken pick and an empty Default give the built-in layout",
+      "picks": { "doctors": "gone" },
+      "postType": "doctors",
+      "layouts": {},
+      "defaultSections": [],
+      "expect": { "choice": "gone", "source": "builtin" }
+    },
+    {
+      "name": "a pick still works when the Default is empty",
+      "picks": { "doctors": "hero" },
+      "postType": "doctors",
+      "layouts": { "hero": [{ "name": "hero", "content": "<section>HERO</section>" }] },
+      "defaultSections": [],
+      "expect": { "choice": "hero", "source": "layout" }
+    }
+  ]
+}
