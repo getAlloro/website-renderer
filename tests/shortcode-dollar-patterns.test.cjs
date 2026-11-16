@@ -10,7 +10,8 @@ const vm = require('node:vm');
 
 const database = require('../dist/lib/db');
 const redis = require('../dist/lib/redis');
-const rows = { post_blocks: [], posts: [], projects: [], review_blocks: [], reviews: [] };
+// site_page_access: the members-only gate asks once per site whether any path is gated; none here.
+const rows = { post_blocks: [], posts: [], projects: [], review_blocks: [], reviews: [], site_page_access: [] };
 const cache = {};
 
 function query(table) {

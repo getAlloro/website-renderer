@@ -16,6 +16,7 @@ import { siteNotFoundPage } from '../templates/site-not-found';
 import { siteNotReadyPage } from '../templates/site-not-ready';
 import { siteArchivedPage } from '../templates/site-archived';
 import { pageNotFoundPage } from '../templates/page-not-found';
+import { memberForbiddenPage } from '../templates/member-forbidden';
 import { successPage } from '../templates/success-page';
 import { renderPage, normalizeSections, injectSeoMeta } from '../utils/renderer';
 import { resolvePostBlocks } from '../services/postblock.service';
@@ -26,6 +27,8 @@ import { resolveReviewBlocks } from '../services/review.service';
 import { resolveFormBlocks } from '../services/form.service';
 import { resolveShopBlocks } from '../services/shopblock.service';
 import { resolveRedirect as resolveRedirectForProject } from '../services/redirect.service';
+import { resolveMemberGate, forceNoindex } from '../services/member-access.service';
+import { readMemberToken, buildSignInRedirect } from '../middleware/memberSession';
 import { renderPostBlockHtml } from '../utils/shortcodes';
 import { processTailwindCSS } from '../utils/tailwind';
 import { localizeVersionedImports } from '../utils/versionedImports';
@@ -423,6 +426,37 @@ export async function assembleResolvedSinglePostHtml(
   return html;
 }
 
+/**
+ * Members-only gate for one resolved target (a page, an artifact asset, a post under a
+ * members-only path). Returns 'open' for a public path, 'allow' for a signed-in member
+ * who may see it, and 'handled' when the response (404, sign-in redirect, 403) was sent.
+ * A site with no members-only paths gets 'open' without a cookie read.
+ */
+async function enforceMemberGate(
+  req: Request, res: Response, project: Project, pagePath: string, businessName: string | undefined
+): Promise<'open' | 'allow' | 'handled'> {
+  const { decision } = await resolveMemberGate(project, pagePath, () => readMemberToken(req.headers.cookie));
+  if (decision === 'open' || decision === 'allow') return decision;
+
+  if (decision === 'not-found') {
+    res.status(404).type('html').send(pageNotFoundPage(businessName));
+    return 'handled';
+  }
+
+  res.set('Cache-Control', 'no-store').vary('Cookie');
+  if (decision === 'sign-in') {
+    res.redirect(302, buildSignInRedirect(pagePath, req.originalUrl.slice(req.path.length)));
+    return 'handled';
+  }
+  res.status(403).type('html').send(memberForbiddenPage(businessName));
+  return 'handled';
+}
+
+/** Headers for anything served to a signed-in member: never cached, never shared, never indexed. */
+function markMemberOnly(res: Response): void {
+  res.set('Cache-Control', 'private, no-store').set('X-Robots-Tag', 'noindex, nofollow').vary('Cookie');
+}
+
 export async function siteRoute(req: Request, res: Response): Promise<void> {
   const hostname = res.locals.hostname as string | undefined;
   const customDomain = res.locals.customDomain as string | undefined;
@@ -571,10 +605,19 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
   // Get the page content
   const page = await getPageToRender(project.id, pagePath);
 
+  // Members-only gate for a resolved page (normal or artifact), before any assembly.
+  let memberOnly = false;
+  if (page) {
+    const gate = await enforceMemberGate(req, res, project, pagePath, businessName);
+    if (gate === 'handled') return;
+    memberOnly = gate === 'allow';
+  }
+
   // Artifact page: serve the React app with header/footer/SEO injection
   if (page && page.page_type === 'artifact') {
     const html = await assembleArtifactHtml(project, page, servingHost);
-    res.type('html').send(html);
+    if (memberOnly) markMemberOnly(res);
+    res.type('html').send(memberOnly ? forceNoindex(html) : html);
     return;
   }
 
@@ -582,15 +625,18 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
     // Try artifact asset sub-request (e.g., /calculator/assets/index-abc.js)
     const artifactMatch = await getArtifactPageByPrefix(project.id, pagePath);
     if (artifactMatch && artifactMatch.page.artifact_s3_prefix) {
+      // Members-only gate for an artifact app's own files, before the file is fetched.
+      const gate = await enforceMemberGate(req, res, project, pagePath, businessName);
+      if (gate === 'handled') return;
       const asset = await fetchArtifactAsset(
         artifactMatch.page.artifact_s3_prefix,
         artifactMatch.subPath
       );
       if (asset) {
-        res
-          .type(asset.contentType)
-          .set('Cache-Control', 'public, max-age=31536000, immutable')
-          .send(asset.buffer);
+        res.type(asset.contentType);
+        if (gate === 'allow') markMemberOnly(res);
+        else res.set('Cache-Control', 'public, max-age=31536000, immutable');
+        res.send(asset.buffer);
         return;
       }
     }
@@ -605,13 +651,17 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
         segments[1]
       );
       if (singlePost) {
+        // Posts are public, except a post whose path lies under a members-only path.
+        const gate = await enforceMemberGate(req, res, project, pagePath, businessName);
+        if (gate === 'handled') return;
         const readiness = await generationPostReadinessMarker(project, singlePost.postType.id, singlePost.post.id, pagePath);
         const html = await assembleSinglePostHtml(project, singlePost.postType, singlePost.post, servingHost);
         if (readiness) {
           if (readiness !== await generationPostReadinessMarker(project, singlePost.postType.id, singlePost.post.id, pagePath)) throw new Error('GENERATION_READINESS_CHANGED_DURING_RENDER');
           res.set(GENERATION_READY_HEADER, readiness).set('Cache-Control', 'no-store');
         }
-        res.type('html').send(html);
+        if (gate === 'allow') markMemberOnly(res);
+        res.type('html').send(gate === 'allow' ? forceNoindex(html) : html);
         return;
       }
     }
@@ -637,5 +687,6 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
     if (readiness !== await generationPublishedReadinessMarker(project, page)) throw new Error('GENERATION_READINESS_CHANGED_DURING_RENDER');
     res.set(GENERATION_READY_HEADER, readiness).set('Cache-Control', 'no-store');
   }
-  res.type('html').send(html);
+  if (memberOnly) markMemberOnly(res);
+  res.type('html').send(memberOnly ? forceNoindex(html) : html);
 }

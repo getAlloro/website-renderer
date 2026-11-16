@@ -1,6 +1,7 @@
 import { getDb } from '../lib/db';
 import { getRedis } from '../lib/redis';
 import type { Project } from '../types';
+import { listGatedPaths, matchGatedPath } from './member-access.service';
 
 /**
  * Per-project robots.txt + sitemap.xml.
@@ -70,7 +71,41 @@ export async function buildRobotsTxt(project: Project): Promise<string> {
   return robots;
 }
 
+/**
+ * Drop every <url> entry whose path is members-only (the path itself or anything
+ * under it). Works on the finished XML so the cached, unfiltered sitemap stays
+ * exactly what it was. With no members-only paths the XML is returned untouched.
+ */
+export function removeGatedSitemapEntries(xml: string, host: string, gatedPaths: readonly string[]): string {
+  if (gatedPaths.length === 0) return xml;
+  const origin = xmlEscape(`https://${host}`);
+  return xml.replace(
+    / {2}<url>\n {4}<loc>([^<]*)<\/loc>(?:\n {4}<lastmod>[^<]*<\/lastmod>)?\n {2}<\/url>\n/g,
+    (block: string, loc: string) => {
+      if (!loc.startsWith(origin)) return block;
+      const path = loc
+        .slice(origin.length)
+        .replace(/&apos;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/&gt;/g, '>')
+        .replace(/&lt;/g, '<')
+        .replace(/&amp;/g, '&');
+      return matchGatedPath(gatedPaths, path || '/') === null ? block : '';
+    }
+  );
+}
+
+/**
+ * The sitemap without members-only pages. The access rows are read fresh on every
+ * request and the filtered result is never cached, so an access change shows at once
+ * even while the unfiltered sitemap is still in Redis.
+ */
 export async function buildSitemapXml(project: Project): Promise<string> {
+  const xml = await buildUnfilteredSitemapXml(project);
+  return removeGatedSitemapEntries(xml, primaryPublicHost(project), await listGatedPaths(project));
+}
+
+async function buildUnfilteredSitemapXml(project: Project): Promise<string> {
   const redis = getRedis();
   const cacheKey = `sitemap:${project.id}`;
 
