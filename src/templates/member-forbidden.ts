@@ -21,18 +21,18 @@ export function memberForbiddenPage(businessName?: string): string {
 <style>${animationStyles}</style>
 <div class="site-page-wrapper" style="background-color: #fafafa;">
   <div style="text-align: center; padding: 3rem 2rem; max-width: 500px;">
-    <div style="font-size: 6rem; font-weight: 800; color: ${brandColor}; line-height: 1; margin-bottom: 1rem; opacity: 0.2;">
-      403
+    <div aria-hidden="true" style="display: inline-flex; align-items: center; justify-content: center; width: 4.5rem; height: 4.5rem; margin-bottom: 1.5rem; border-radius: 9999px; background-color: ${brandColor}1a; color: ${brandColor};">
+      <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
     </div>
     <h1 style="color: #1f2937; font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem;">
-      This page is for a different members group.
+      This page is for another group.
     </h1>
     <p style="color: #6b7280; font-size: 1rem; line-height: 1.6; margin-bottom: 2rem;">
-      You are signed in, but your membership does not include this page.
+      You are signed in, but your membership does not include this page. If you think it should, ask the person who invited you.
     </p>
     <a href="/" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; background-color: ${brandColor}; color: white; border-radius: 0.75rem; text-decoration: none; font-weight: 600; font-size: 0.875rem; box-shadow: 0 4px 14px ${brandColor}40;">
       ${icons.arrowLeft}
-      Go to Homepage
+      Back to the homepage
     </a>
     <p style="margin-top: 2rem; font-size: 0.875rem; color: #6b7280; line-height: 1.6;">
       Signed in with the wrong email?
