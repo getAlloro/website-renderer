@@ -618,3 +618,118 @@ export function parseFormBlockShortcodes(html: string): FormBlockShortcode[] {
 export function hasFormBlockShortcodes(html: string): boolean {
   return html.includes('form_block');
 }
+
+// ---------------------------------------------------------------------------
+// Shop blocks — {{ start_shop_block ... }} card markup {{ end_shop_block }}
+// ---------------------------------------------------------------------------
+
+/**
+ * A live list of the site's Store products, written as a pair of tokens around the site's own card
+ * markup. The markup between the tokens is repeated once per product, with {{product.*}} tokens
+ * filled from the Store when the page is served, so a price change or a hidden product shows up
+ * without anyone editing the page. Attributes (all optional, any order):
+ *   limit='3'          at most this many products (1-48; default every showing product)
+ *   tags='light,decaf' only products carrying at least one of these Store tag slugs
+ *   exclude='current'  leave out the product whose own page (/shop/<slug>) is being served
+ */
+export interface ShopBlockShortcode {
+  raw: string;
+  template: string;
+  limit: number | null;
+  tags: string[];
+  excludeCurrent: boolean;
+}
+
+/** One product as a shop block can show it. Built by shopblock.service from the Store tables. */
+export interface ShopBlockProduct {
+  slug: string;
+  name: string;
+  description: string;
+  image: string;
+  imageAlt: string;
+  minCents: number;
+  hasPriceRange: boolean;
+  currency: string;
+  tags: { slug: string; name: string }[];
+}
+
+export const SHOP_BLOCK_REGEX = /\{\{\s*start_shop_block((?:\s+[a-z_]+='[^']*')*)\s*\}\}([\s\S]*?)\{\{\s*end_shop_block\s*\}\}/gi;
+const SHOP_BLOCK_ATTR_REGEX = /([a-z_]+)='([^']*)'/gi;
+export const SHOP_BLOCK_MAX_LIMIT = 48;
+
+function parseShopBlockAttrs(attrText: string): Omit<ShopBlockShortcode, 'raw' | 'template'> {
+  const attrs: Record<string, string> = {};
+  SHOP_BLOCK_ATTR_REGEX.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = SHOP_BLOCK_ATTR_REGEX.exec(attrText)) !== null) attrs[m[1].toLowerCase()] = m[2];
+  const n = Number.parseInt(attrs.limit ?? '', 10);
+  const limit = Number.isFinite(n) && n > 0 ? Math.min(n, SHOP_BLOCK_MAX_LIMIT) : null;
+  const tags = (attrs.tags ?? '').split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
+  return { limit, tags, excludeCurrent: (attrs.exclude ?? '').trim().toLowerCase() === 'current' };
+}
+
+/** Every shop block in the HTML, in order. */
+export function parseShopBlockShortcodes(html: string): ShopBlockShortcode[] {
+  const results: ShopBlockShortcode[] = [];
+  SHOP_BLOCK_REGEX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SHOP_BLOCK_REGEX.exec(html)) !== null) {
+    results.push({ raw: match[0], template: match[2], ...parseShopBlockAttrs(match[1] || '') });
+  }
+  return results;
+}
+
+/** The cheap pre-check. */
+export function hasShopBlockShortcodes(html: string): boolean {
+  return html.includes('start_shop_block');
+}
+
+/** "$14" for whole amounts, "$14.50" otherwise. Only USD carries a symbol; others get their code. */
+export function formatShopPrice(cents: number, currency: string): string {
+  const amount = cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2);
+  return (currency || 'usd').toLowerCase() === 'usd' ? `$${amount}` : `${amount} ${currency.toUpperCase()}`;
+}
+
+/** The product's own page on the site, as the Store publishes it. */
+export function shopProductPath(slug: string): string {
+  return `/shop/${encodeURIComponent(slug)}`;
+}
+
+/**
+ * The products one block shows: tag filter, current-page exclusion, then the limit, keeping the
+ * Store's own order. `currentPath` is the path of the page being served.
+ */
+export function pickShopProducts(block: ShopBlockShortcode, products: ShopBlockProduct[], currentPath?: string): ShopBlockProduct[] {
+  let list = products;
+  if (block.tags.length) list = list.filter((p) => p.tags.some((t) => block.tags.includes(t.slug)));
+  if (block.excludeCurrent && currentPath) {
+    const here = currentPath.replace(/\/+$/, '').toLowerCase();
+    list = list.filter((p) => shopProductPath(p.slug).toLowerCase() !== here);
+  }
+  return block.limit ? list.slice(0, block.limit) : list;
+}
+
+/**
+ * Fill one copy of the card markup. Every token is HTML-escaped; an unknown {{product.*}} token
+ * renders nothing rather than leaking into the page.
+ *   {{product.name}} {{product.url}} {{product.image}} {{product.image_alt}} {{product.description}}
+ *   {{product.price}} lowest price, "$14"     {{product.price_label}} "From $14" when sizes differ, else "$14"
+ *   {{product.tag}} first tag name           {{product.tags}} every tag name, ", "-joined
+ *   {{product.tag_slugs}} space-joined slugs (for data attributes)
+ */
+export function renderShopProductHtml(template: string, p: ShopBlockProduct): string {
+  const price = formatShopPrice(p.minCents, p.currency);
+  const values: Record<string, string> = {
+    name: p.name,
+    url: shopProductPath(p.slug),
+    image: p.image,
+    image_alt: p.imageAlt || p.name,
+    description: p.description,
+    price,
+    price_label: p.hasPriceRange ? `From ${price}` : price,
+    tag: p.tags[0]?.name ?? '',
+    tags: p.tags.map((t) => t.name).join(', '),
+    tag_slugs: p.tags.map((t) => t.slug).join(' '),
+  };
+  return template.replace(/\{\{\s*product\.([a-z_]+)\s*\}\}/g, (_m, key: string) => escapeHtml(values[key] ?? ''));
+}

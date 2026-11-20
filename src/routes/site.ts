@@ -24,6 +24,7 @@ import { GENERATION_READY_HEADER } from '../utils/generation-readiness';
 import { resolveMenus } from '../services/menu.service';
 import { resolveReviewBlocks } from '../services/review.service';
 import { resolveFormBlocks } from '../services/form.service';
+import { resolveShopBlocks } from '../services/shopblock.service';
 import { resolveRedirect as resolveRedirectForProject } from '../services/redirect.service';
 import { renderPostBlockHtml } from '../utils/shortcodes';
 import { processTailwindCSS } from '../utils/tailwind';
@@ -170,6 +171,9 @@ export async function assembleResolvedHtml(project: Project, page: Pick<Page, 'i
     project.id,
     getApiBaseUrl()
   );
+
+  // Resolve {{ start_shop_block }} … {{ end_shop_block }} (live Store products)
+  html = await resolveShopBlocks(html, project.id, page.path);
 
   // Resolve {{ post_block }} shortcodes (runtime post rendering)
   html = await resolvePostBlocks(html, project.template_id, project.id);
@@ -383,6 +387,9 @@ export async function assembleResolvedSinglePostHtml(
     project.id,
     getApiBaseUrl()
   );
+
+  // Single post pages may also show live Store products
+  html = await resolveShopBlocks(html, project.id);
 
   // Single post pages may also contain post block shortcodes
   html = await resolvePostBlocks(html, project.template_id, project.id);
