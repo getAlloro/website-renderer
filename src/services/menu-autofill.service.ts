@@ -25,6 +25,7 @@
 
 import { getDb } from '../lib/db';
 import { getRedis } from '../lib/redis';
+import { excludeGatedPosts, listGatedPostIds, postGateCacheTag, toPostGateSite, type PostGateSite } from './member-access.service';
 
 /** Must match src/config/menuItems.ts in getAlloro/alloro. */
 const ITEM_TYPE_POST_AUTOFILL = 'post_autofill';
@@ -89,30 +90,41 @@ function compareForFill(a: AutofillPost, b: AutofillPost, oldestFirst: boolean):
  * `ordered_at` is COALESCE(published_at, created_at), not published_at alone —
  * production holds a published post with a NULL published_at, and ordering by a
  * null column would drop that entry somewhere unpredictable in the nav.
+ *
+ * `gatedPostIds` are the site's members-only posts (member-access.service). A menu is
+ * public, so they are left out in the query, before the shared cache is written; the
+ * cache key names that set, and a cached list is filtered again on the way out.
  */
 async function fetchAutofillPosts(
   projectId: string,
-  postTypeIds: string[]
+  postTypeIds: string[],
+  gatedPostIds: readonly string[]
 ): Promise<AutofillPost[]> {
   if (postTypeIds.length === 0) return [];
 
   const redis = getRedis();
-  const cacheKey = `menuposts:${projectId}:${[...postTypeIds].sort().join(',')}`;
+  const cacheKey = `menuposts:${projectId}:${[...postTypeIds].sort().join(',')}${postGateCacheTag(gatedPostIds)}`;
 
   try {
     const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached);
+    if (cached) return excludeGatedPosts(JSON.parse(cached) as AutofillPost[], gatedPostIds);
   } catch {
     // Cache miss or Redis down — fall through to DB
   }
 
   const db = getDb();
 
-  const rows: AutofillPost[] = await db('posts')
+  let query = db('posts')
     .join('post_types', 'posts.post_type_id', 'post_types.id')
     .where('posts.project_id', projectId)
     .whereIn('posts.post_type_id', postTypeIds)
-    .where('posts.status', 'published')
+    .where('posts.status', 'published');
+
+  if (gatedPostIds.length > 0) {
+    query = query.whereNotIn('posts.id', [...gatedPostIds]);
+  }
+
+  const fetched: AutofillPost[] = await query
     .select(
       'posts.id',
       'posts.post_type_id',
@@ -122,6 +134,7 @@ async function fetchAutofillPosts(
       'posts.sort_order',
       db.raw('COALESCE(posts.published_at, posts.created_at) as ordered_at')
     );
+  const rows = excludeGatedPosts(fetched, gatedPostIds);
 
   try {
     await redis.set(cacheKey, JSON.stringify(rows), 'EX', AUTOFILL_POSTS_TTL);
@@ -152,7 +165,7 @@ type ExpandableRow = MenuItemAutofillFields & {
  * fetch around it.
  */
 export async function expandAutofillItems<T extends ExpandableRow>(
-  projectId: string,
+  siteOrProjectId: PostGateSite | string,
   items: T[]
 ): Promise<T[]> {
   const placeholders = items.filter(isAutofillPlaceholder);
@@ -166,7 +179,8 @@ export async function expandAutofillItems<T extends ExpandableRow>(
     ),
   ];
 
-  const posts = await fetchAutofillPosts(projectId, postTypeIds);
+  const site = toPostGateSite(siteOrProjectId);
+  const posts = await fetchAutofillPosts(site.id, postTypeIds, await listGatedPostIds(site));
   return expandWithPosts(items, posts);
 }
 

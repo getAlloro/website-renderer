@@ -27,7 +27,7 @@ import { resolveReviewBlocks } from '../services/review.service';
 import { resolveFormBlocks } from '../services/form.service';
 import { resolveShopBlocks } from '../services/shopblock.service';
 import { resolveRedirect as resolveRedirectForProject } from '../services/redirect.service';
-import { resolveMemberGate, forceNoindex } from '../services/member-access.service';
+import { resolveMemberGate, resolvePostGate, forceNoindex } from '../services/member-access.service';
 import { readMemberToken, buildSignInRedirect } from '../middleware/memberSession';
 import { renderPostBlockHtml } from '../utils/shortcodes';
 import { processTailwindCSS } from '../utils/tailwind';
@@ -179,13 +179,13 @@ export async function assembleResolvedHtml(project: Project, page: Pick<Page, 'i
   html = await resolveShopBlocks(html, project.id, page.path);
 
   // Resolve {{ post_block }} shortcodes (runtime post rendering)
-  html = await resolvePostBlocks(html, project.template_id, project.id);
+  html = await resolvePostBlocks(html, project.template_id, project);
 
   // Resolve {{ review_block }} shortcodes (runtime review rendering)
   html = await resolveReviewBlocks(html, project.id, project.template_id || undefined);
 
   // Resolve {{ menu id='slug' }} shortcodes
-  html = await resolveMenus(html, project.id, project.template_id || undefined);
+  html = await resolveMenus(html, project, project.template_id || undefined);
 
   // Resolve {{ form_block id='uuid' }} shortcodes (published form markup)
   html = await resolveFormBlocks(html, project.id);
@@ -395,13 +395,13 @@ export async function assembleResolvedSinglePostHtml(
   html = await resolveShopBlocks(html, project.id);
 
   // Single post pages may also contain post block shortcodes
-  html = await resolvePostBlocks(html, project.template_id, project.id);
+  html = await resolvePostBlocks(html, project.template_id, project);
 
   // Resolve {{ review_block }} shortcodes
   html = await resolveReviewBlocks(html, project.id, project.template_id || undefined);
 
   // Resolve {{ menu id='slug' }} shortcodes
-  html = await resolveMenus(html, project.id, project.template_id || undefined);
+  html = await resolveMenus(html, project, project.template_id || undefined);
 
   // Resolve {{ form_block id='uuid' }} shortcodes (published form markup)
   html = await resolveFormBlocks(html, project.id);
@@ -457,6 +457,29 @@ function markMemberOnly(res: Response): void {
   res.set('Cache-Control', 'private, no-store').set('X-Robots-Tag', 'noindex, nofollow').vary('Cookie');
 }
 
+/**
+ * Members-only gate for one post address, asked BEFORE the shared single post cache is
+ * touched. 'open' for a post anyone may read, 'allow' for a signed-in member who may see
+ * a members-only post, and 'handled' when the response (404, sign-in redirect, 403) was
+ * sent. Every refusal is private, never stored and never indexed, and carries no post content.
+ */
+async function enforcePostGate(
+  req: Request, res: Response, project: Project, typeSlug: string, postSlug: string, pagePath: string, businessName: string | undefined
+): Promise<{ outcome: 'open' | 'allow' | 'handled'; gatedPostIds: string[] }> {
+  const { decision, gatedPostIds } = await resolvePostGate(project, typeSlug, postSlug, () => readMemberToken(req.headers.cookie));
+  if (decision === 'open' || decision === 'allow') return { outcome: decision, gatedPostIds };
+
+  markMemberOnly(res);
+  if (decision === 'not-found') {
+    res.status(404).type('html').send(pageNotFoundPage(businessName));
+  } else if (decision === 'sign-in') {
+    res.redirect(302, buildSignInRedirect(pagePath, req.originalUrl.slice(req.path.length)));
+  } else {
+    res.status(403).type('html').send(memberForbiddenPage(businessName));
+  }
+  return { outcome: 'handled', gatedPostIds };
+}
+
 export async function siteRoute(req: Request, res: Response): Promise<void> {
   const hostname = res.locals.hostname as string | undefined;
   const customDomain = res.locals.customDomain as string | undefined;
@@ -471,7 +494,9 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
   if (req.query.nocache === '1') {
     try {
       const redis = getRedis();
-      const patterns = ['pb:*', 'posts:*', 'sp:*', 'mt:*', 'menu:*', 'tw:*', 'redir:*', 'rb:*', 'reviews:*', 'sitemap:*', 'robots:*', 'form:*', 'imp:*'];
+      // `posts:*` does not match `posts-count:*`, and `menu:*` does not match `menuposts:*`:
+      // the post feed (`api:*`), post counts and menu auto-fill lists are named on their own.
+      const patterns = ['pb:*', 'posts:*', 'posts-count:*', 'api:*', 'sp:*', 'mt:*', 'menu:*', 'menuposts:*', 'tw:*', 'redir:*', 'rb:*', 'reviews:*', 'sitemap:*', 'robots:*', 'form:*', 'imp:*'];
       for (const pattern of patterns) {
         let cursor = '0';
         do {
@@ -644,16 +669,29 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
     // Try single post routing for 2-segment paths: /{type-slug}/{post-slug}
     const segments = pagePath.split('/').filter(Boolean);
     if (segments.length === 2 && project.template_id) {
+      // Members-only post: decided before the shared `sp:` cache is read, and a
+      // members-only post is never read from or written to that cache.
+      const postGate = await enforcePostGate(req, res, project, segments[0], segments[1], pagePath, businessName);
+      if (postGate.outcome === 'handled') return;
       const singlePost = await getSinglePostData(
         project.id,
         project.template_id,
         segments[0],
-        segments[1]
+        segments[1],
+        { skipCache: postGate.outcome === 'allow' }
       );
+      // The gate matched by address. A cached entry that turns out to be a members-only
+      // post (its address changed while the entry was live) is never served.
+      if (singlePost && postGate.outcome === 'open' && postGate.gatedPostIds.includes(singlePost.post.id)) {
+        markMemberOnly(res);
+        res.status(404).type('html').send(pageNotFoundPage(businessName));
+        return;
+      }
       if (singlePost) {
-        // Posts are public, except a post whose path lies under a members-only path.
-        const gate = await enforceMemberGate(req, res, project, pagePath, businessName);
-        if (gate === 'handled') return;
+        // A post whose path lies under a members-only path is gated by that path too.
+        const pathGate = await enforceMemberGate(req, res, project, pagePath, businessName);
+        if (pathGate === 'handled') return;
+        const gate = pathGate === 'allow' || postGate.outcome === 'allow' ? 'allow' : 'open';
         const readiness = await generationPostReadinessMarker(project, singlePost.postType.id, singlePost.post.id, pagePath);
         const html = await assembleSinglePostHtml(project, singlePost.postType, singlePost.post, servingHost);
         if (readiness) {

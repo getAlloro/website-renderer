@@ -17,13 +17,17 @@
 
 import crypto from 'crypto';
 import { getDb } from '../lib/db';
-import type { GateDecision, MemberPageAccess, MemberSession, Project } from '../types';
+import type { GateDecision, GatedPost, MemberPageAccess, MemberPostAccess, MemberSession, Project } from '../types';
 
 const ACCESS_TABLE = 'website_builder.site_page_access';
 const ACCESS_GROUPS_TABLE = 'website_builder.site_page_access_groups';
 const SESSIONS_TABLE = 'website_builder.site_member_sessions';
 const MEMBERS_TABLE = 'website_builder.site_members';
 const MEMBERSHIPS_TABLE = 'website_builder.site_member_group_memberships';
+const POST_ACCESS_TABLE = 'website_builder.site_post_access';
+const POST_ACCESS_GROUPS_TABLE = 'website_builder.site_post_access_groups';
+const POSTS_TABLE = 'website_builder.posts';
+const POST_TYPES_TABLE = 'website_builder.post_types';
 
 const UNDEFINED_TABLE = '42P01';
 const ANY_ACCESS_MEMO_MS = 60_000;
@@ -93,8 +97,8 @@ export function matchGatedPath(gatedPaths: readonly string[], requestPath: strin
 }
 
 export interface GateInput {
-  /** The access row covering this path, or null when the path is public. */
-  access: MemberPageAccess | null;
+  /** The access rule covering this path or post, or null when it is public. */
+  access: Pick<MemberPageAccess, 'groupIds'> | null;
   /** projects.members_enabled. */
   isMembersEnabled: boolean;
   /** The signed-in, active member of THIS site, or null. */
@@ -171,9 +175,10 @@ export async function hasAnyPageAccess(projectId: string, now: number = Date.now
   return hasAny;
 }
 
-/** Test seam: forget the 60-second memo. */
+/** Test seam: forget the 60-second memos (members-only paths and members-only posts). */
 export function resetMemberAccessMemo(): void {
   anyAccessMemo.clear();
+  anyPostAccessMemo.clear();
 }
 
 /**
@@ -274,4 +279,169 @@ export async function resolveMemberGate(
   const token = readToken();
   const member = token ? await getMemberForSession(project.id, hashSessionToken(token)) : null;
   return { decision: decideGate({ access, isMembersEnabled, member }), access };
+}
+
+// ---------------------------------------------------------------------------
+// Members-only posts (getAlloro/alloro plans/11192026-site-courses-library, T3)
+//
+// A row in site_post_access makes one post members-only; rows in
+// site_post_access_groups limit it to groups. No row means the post is open to everyone.
+//
+// ⛔ EVERY place that reads posts for the public goes through this section:
+//   - a single post page asks resolvePostGate BEFORE its cache is read;
+//   - every list, feed, menu and sitemap asks listGatedPosts / listGatedPostIds and
+//     leaves those posts out BEFORE its shared cache is written.
+// A new public reader of posts must do the same.
+//
+// Like the path gate, nothing here is cached in Redis: the members-only posts of a
+// site are read fresh (one small query), so an access change applies on the next
+// request. The shared list caches stay correct without a flush because their keys
+// carry postGateCacheTag(): a different set of members-only posts is a different key.
+//
+// Members switch off: same as the path gate, fail closed. A members-only post is a
+// 404 at its own address and stays out of every list. A site with the switch off and
+// no rows pays at most one small query a minute (the same 60-second memo).
+// ---------------------------------------------------------------------------
+
+/** What the post gate needs to know about a site. A row from before the app migration has no flag: off. */
+export type PostGateSite = Pick<Project, 'id' | 'members_enabled'>;
+
+/**
+ * A caller that only holds a project id does not know the members switch. That is
+ * treated as "may be on": the members-only posts are read fresh every time, never
+ * through the 60-second memo. Pass the project where there is one.
+ */
+export function toPostGateSite(site: PostGateSite | string): PostGateSite {
+  return typeof site === 'string' ? { id: site, members_enabled: true } : site;
+}
+
+async function loadGatedPosts(projectId: string): Promise<GatedPost[]> {
+  return withMissingTablesAs<GatedPost[]>([], async () => {
+    const rows: Array<{ access_id: string; post_id: string; post_slug: string; type_slug: string }> = await getDb()(`${POST_ACCESS_TABLE} as a`)
+      .join(`${POSTS_TABLE} as p`, function () {
+        this.on('p.id', '=', 'a.post_id').andOn('p.project_id', '=', 'a.project_id');
+      })
+      .join(`${POST_TYPES_TABLE} as pt`, 'pt.id', 'p.post_type_id')
+      .where('a.project_id', projectId)
+      .select('a.id as access_id', 'a.post_id as post_id', 'p.slug as post_slug', 'pt.slug as type_slug');
+    return rows.map((row) => ({ accessId: row.access_id, postId: row.post_id, typeSlug: row.type_slug, postSlug: row.post_slug }));
+  });
+}
+
+const anyPostAccessMemo = new Map<string, { hasAny: boolean; expiresAt: number }>();
+
+/** True when the site has at least one members-only post. Memoised in this process for 60 seconds per site. */
+export async function hasAnyPostAccess(projectId: string, now: number = Date.now()): Promise<boolean> {
+  const memo = anyPostAccessMemo.get(projectId);
+  if (memo && memo.expiresAt > now) return memo.hasAny;
+
+  const hasAny = await withMissingTablesAs(false, async () => {
+    const row = await getDb()(POST_ACCESS_TABLE).where({ project_id: projectId }).select('id').first();
+    return !!row;
+  });
+
+  if (anyPostAccessMemo.size >= ANY_ACCESS_MEMO_MAX_ENTRIES) anyPostAccessMemo.clear();
+  anyPostAccessMemo.set(projectId, { hasAny, expiresAt: now + ANY_ACCESS_MEMO_MS });
+  return hasAny;
+}
+
+/**
+ * Every members-only post of a site, read fresh in one query: its id (for lists) and
+ * its address (for the single post page and the sitemap). Empty for a site that has none.
+ * Drafts are included on purpose: a members-only post never depends on its status to stay hidden.
+ */
+export async function listGatedPosts(site: PostGateSite): Promise<GatedPost[]> {
+  if (site.members_enabled !== true && !(await hasAnyPostAccess(site.id))) return [];
+  return loadGatedPosts(site.id);
+}
+
+/** The ids of a site's members-only posts, de-duplicated and sorted. */
+export async function listGatedPostIds(site: PostGateSite): Promise<string[]> {
+  return gatedPostIds(await listGatedPosts(site));
+}
+
+function gatedPostIds(gated: readonly GatedPost[]): string[] {
+  return [...new Set(gated.map((post) => post.postId))].sort();
+}
+
+/**
+ * Leave members-only posts out of a list. With none, the SAME array is returned, so a
+ * site with no members-only posts is untouched.
+ */
+export function excludeGatedPosts<T extends { id: string }>(posts: T[], gatedIds: readonly string[]): T[] {
+  if (gatedIds.length === 0) return posts;
+  const gated = new Set(gatedIds);
+  return posts.filter((post) => !gated.has(post.id));
+}
+
+/**
+ * Suffix for a shared (per-site, not per-visitor) cache key that holds a list of posts.
+ * Empty when the site has no members-only posts, so its keys are exactly what they were.
+ * Otherwise it names the set of members-only posts: change the set and the old entry is
+ * never read again, with or without a cache flush.
+ */
+export function postGateCacheTag(gatedIds: readonly string[]): string {
+  if (gatedIds.length === 0) return '';
+  const digest = crypto.createHash('sha256').update([...new Set(gatedIds)].sort().join(','), 'utf8').digest('hex');
+  return `:g${digest.slice(0, 12)}`;
+}
+
+/** The address of a post, as the single post route and the sitemap write it. */
+export function gatedPostPath(post: Pick<GatedPost, 'typeSlug' | 'postSlug'>): string {
+  return `/${post.typeSlug}/${post.postSlug}`;
+}
+
+/** The members-only post at /{typeSlug}/{postSlug}, or null. Exact match on both parts. */
+export function findGatedPost(gated: readonly GatedPost[], typeSlug: string, postSlug: string): GatedPost | null {
+  return gated.find((post) => post.typeSlug === typeSlug && post.postSlug === postSlug) ?? null;
+}
+
+export interface PostGateResult {
+  decision: GateDecision;
+  /** The access rule of the post at this address, or null when it is open to everyone. */
+  access: MemberPostAccess | null;
+  /** Every members-only post id of the site, for a caller that must re-check a cached post by id. */
+  gatedPostIds: string[];
+}
+
+/**
+ * THE gate for one post address, /{typeSlug}/{postSlug}. Same decisions as the path gate:
+ *   no access row                          -> open       (serve as today)
+ *   members-only, switch off               -> not-found  (fail closed)
+ *   members-only, no valid session         -> sign-in
+ *   members-only, member in no listed group -> forbidden
+ *   members-only, allowed                  -> allow
+ * `readToken` is only called once a members-only post on a members-enabled site is
+ * found, so a public post does no cookie work.
+ */
+export async function resolvePostGate(
+  site: PostGateSite,
+  typeSlug: string,
+  postSlug: string,
+  readToken: () => string | null
+): Promise<PostGateResult> {
+  const gated = await listGatedPosts(site);
+  const ids = gatedPostIds(gated);
+  const match = findGatedPost(gated, typeSlug, postSlug);
+  if (!match) return { decision: 'open', access: null, gatedPostIds: ids };
+
+  const isMembersEnabled = site.members_enabled === true;
+  if (!isMembersEnabled) {
+    const access = { postId: match.postId, groupIds: [] };
+    return { decision: decideGate({ access, isMembersEnabled, member: null }), access, gatedPostIds: ids };
+  }
+
+  // A failure here must not open the post: only a missing table falls back, and that
+  // fallback ("no groups") still requires a signed-in member.
+  const groupRows = await withMissingTablesAs<Array<{ group_id: string }>>([], async () => {
+    const result: Array<{ group_id: string }> = await getDb()(POST_ACCESS_GROUPS_TABLE)
+      .where({ post_access_id: match.accessId, project_id: site.id })
+      .select('group_id');
+    return result;
+  });
+  const access: MemberPostAccess = { postId: match.postId, groupIds: groupRows.map((row) => row.group_id) };
+
+  const token = readToken();
+  const member = token ? await getMemberForSession(site.id, hashSessionToken(token)) : null;
+  return { decision: decideGate({ access, isMembersEnabled, member }), access, gatedPostIds: ids };
 }

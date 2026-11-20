@@ -67,21 +67,29 @@ interface SinglePostResult {
 /**
  * Look up a published post by type slug and post slug.
  * Returns the post type (with single_template) and enriched post data, or null.
+ *
+ * ⛔ The `sp:` cache is shared by every visitor of the site. The public route asks the
+ * post gate (resolvePostGate) BEFORE calling this, and passes `skipCache` for a
+ * members-only post, so such a post is never read from or written to the shared cache.
  */
 export async function getSinglePostData(
   projectId: string,
   templateId: string,
   typeSlug: string,
-  postSlug: string
+  postSlug: string,
+  options: { skipCache?: boolean } = {}
 ): Promise<SinglePostResult | null> {
   const redis = getRedis();
   const cacheKey = `sp:${projectId}:${typeSlug}:${postSlug}`;
+  const useCache = options.skipCache !== true;
 
-  try {
-    const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached);
-  } catch {
-    // Cache miss
+  if (useCache) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch {
+      // Cache miss
+    }
   }
 
   const db = getDb();
@@ -132,10 +140,12 @@ export async function getSinglePostData(
 
   const result: SinglePostResult = { postType, post };
 
-  try {
-    await redis.set(cacheKey, JSON.stringify(result), 'EX', SINGLE_POST_TTL);
-  } catch {
-    // Cache write failure is non-fatal
+  if (useCache) {
+    try {
+      await redis.set(cacheKey, JSON.stringify(result), 'EX', SINGLE_POST_TTL);
+    } catch {
+      // Cache write failure is non-fatal
+    }
   }
 
   return result;

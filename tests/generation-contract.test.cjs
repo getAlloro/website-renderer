@@ -247,7 +247,8 @@ test('foreign run and missing tenant context cannot resolve a snapshot', async (
 test('project block pins preserve dynamic post data and never use another revision or type', async () => {
   redis.getRedis = () => ({ get: async () => null, set: async () => {} });
   database.getDb = () => table => {
-    assert.ok(['posts', 'post_category_assignments', 'post_tag_assignments'].includes(table));
+    // site_post_access: the post gate asks once per page which posts are members-only; none here.
+    assert.ok(['posts', 'post_category_assignments', 'post_tag_assignments', 'website_builder.site_post_access as a'].includes(table));
     const rows = table === 'posts' ? [{ id: 'post-1', title: 'Real project', slug: 'real', content: '', excerpt: '', custom_fields: {}, featured_image: null }] : [];
     const query = { join: () => query, where: () => query, whereIn: () => query, select: () => query, orderBy: () => query, limit: () => query, offset: () => query,
       then: (resolve, reject) => Promise.resolve(rows).then(resolve, reject) };

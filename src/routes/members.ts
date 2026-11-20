@@ -10,14 +10,21 @@
  * the catch-all site route. JSON bodies are parsed here and nowhere else, capped at
  * 8 KiB. Nothing here reads or writes the database.
  *
+ * GET /_members/files/:id is the stable address of a library file. The app decides who
+ * may open it; an allowed member is redirected to a signed link that lasts five minutes.
+ * That link appears in the Location header of that redirect and nowhere else.
+ *
  * Never log an email, a code, a token or a cookie from this file.
  */
 
 import express, { Router, Request, Response, NextFunction } from 'express';
 import { getApiBaseUrl } from '../lib/apiBaseUrl';
+import { memberForbiddenPage } from '../templates/member-forbidden';
+import { pageNotFoundPage } from '../templates/page-not-found';
 import {
   buildClearMemberCookie,
   buildMemberCookie,
+  buildSignInRedirect,
   hostWithoutPort,
   isSameSiteJsonPost,
   isValidMemberToken,
@@ -41,6 +48,14 @@ const MAX_EMAIL_LENGTH = 320;
 const MAX_CODE_LENGTH = 64;
 const MAX_NEXT_LENGTH = 512;
 const HOST_SHAPE = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/;
+
+const FILES_PATH = '/_members/files/';
+const FILE_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const SIGNED_LINK_SHAPE = /^https:\/\/[^\s]+$/;
+// Must match the codes in the app's SiteMembersPublicError.ts.
+const FILE_FORBIDDEN_CODE = 'SITE_MEMBERS_FILE_FORBIDDEN';
+const FILE_UNAVAILABLE_MESSAGE = 'This file is not available right now. Please try again.';
+const FILE_BUSY_MESSAGE = 'Too many tries. Please wait a while and try again.';
 
 interface Envelope {
   success: boolean;
@@ -72,7 +87,7 @@ function siteHost(req: Request): string | null {
 
 interface UpstreamCall {
   method: 'GET' | 'POST';
-  path: '/code' | '/verify' | '/session' | '/signout';
+  path: '/code' | '/verify' | '/session' | '/signout' | '/files/open';
   host: string;
   visitorIp: string | null;
   token?: string | null;
@@ -240,6 +255,66 @@ membersRouter.post('/_members/signout', async (req: Request, res: Response) => {
   }
   res.append('Set-Cookie', buildClearMemberCookie(req.headers.host));
   res.status(200).json({ success: true, data: { signedOut: true }, error: null } satisfies Envelope);
+});
+
+/** The signed link in an allowed answer, or null when the answer does not carry a usable one. */
+function signedLinkFrom(envelope: Envelope): string | null {
+  const url = (envelope.data as { url?: unknown } | null)?.url;
+  return envelope.success && typeof url === 'string' && SIGNED_LINK_SHAPE.test(url) ? url : null;
+}
+
+/**
+ * A library file's stable address. The app is asked every time, signed in or not, so a
+ * site with members off answers 404 here exactly as the app does. The member is whoever
+ * the session cookie belongs to; nothing in the address names one.
+ */
+membersRouter.get(`${FILES_PATH}:id`, async (req: Request, res: Response) => {
+  res.set('Cache-Control', 'private, no-store').set('X-Robots-Tag', 'noindex, nofollow').vary('Cookie');
+  const fileId = String(req.params.id).toLowerCase();
+  const host = siteHost(req);
+  if (!host || !FILE_ID_SHAPE.test(fileId)) {
+    res.status(404).type('html').send(pageNotFoundPage());
+    return;
+  }
+
+  const result = await callApp({
+    method: 'POST',
+    path: '/files/open',
+    host,
+    visitorIp: resolveVisitorIp(req.socket.remoteAddress, req.headers['x-forwarded-for']),
+    token: readMemberToken(req.headers.cookie),
+    body: { fileId },
+  });
+  if (!result) {
+    res.status(503).type('text/plain').send(FILE_UNAVAILABLE_MESSAGE);
+    return;
+  }
+
+  const { status, envelope } = result;
+  const link = status === 200 ? signedLinkFrom(envelope) : null;
+  if (link) {
+    // An empty body: the link is in the Location header only, not repeated in redirect text.
+    res.status(302).set('Location', link).end();
+    return;
+  }
+  if (status === 401) {
+    res.redirect(302, buildSignInRedirect(`${FILES_PATH}${fileId}`));
+    return;
+  }
+  // 400 is the app refusing the id's shape: to a visitor that is the same as a file that is not there.
+  if (status === 404 || status === 400) {
+    res.status(404).type('html').send(pageNotFoundPage());
+    return;
+  }
+  if (status === 403 && envelope.error?.code === FILE_FORBIDDEN_CODE) {
+    res.status(403).type('html').send(memberForbiddenPage());
+    return;
+  }
+  if (status === 429) {
+    res.status(429).type('text/plain').send(FILE_BUSY_MESSAGE);
+    return;
+  }
+  res.status(503).type('text/plain').send(FILE_UNAVAILABLE_MESSAGE);
 });
 
 // Anything else under /_members is not a page: never let it fall through to the site route.

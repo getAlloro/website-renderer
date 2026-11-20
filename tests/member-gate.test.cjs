@@ -343,7 +343,7 @@ test('noindex: every robots meta is replaced by one noindex tag', () => {
 
 test('the 403 page says why, in plain words, and is never indexed', () => {
   const html = memberForbiddenPage('Victor & <Valor>');
-  assert.match(html, /This page is for a different members group\./);
+  assert.match(html, /This page is for another group\./);
   assert.match(html, /href="\/"/);
   assert.match(html, /Sign out/);
   assert.match(html, /<meta name="robots" content="noindex, nofollow">/);

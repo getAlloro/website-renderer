@@ -1,7 +1,7 @@
 import { getDb } from '../lib/db';
 import { getRedis } from '../lib/redis';
 import type { Project } from '../types';
-import { listGatedPaths, matchGatedPath } from './member-access.service';
+import { excludeGatedPosts, gatedPostPath, listGatedPaths, listGatedPosts, matchGatedPath } from './member-access.service';
 
 /**
  * Per-project robots.txt + sitemap.xml.
@@ -78,6 +78,21 @@ export async function buildRobotsTxt(project: Project): Promise<string> {
  */
 export function removeGatedSitemapEntries(xml: string, host: string, gatedPaths: readonly string[]): string {
   if (gatedPaths.length === 0) return xml;
+  return dropSitemapEntries(xml, host, (path) => matchGatedPath(gatedPaths, path) !== null);
+}
+
+/**
+ * Drop the <url> entry of every members-only post. A post address is matched exactly
+ * (trailing slashes aside): it is not a prefix. With no members-only posts the XML is
+ * returned untouched.
+ */
+export function removeGatedPostSitemapEntries(xml: string, host: string, gatedPostPaths: readonly string[]): string {
+  if (gatedPostPaths.length === 0) return xml;
+  const gated = new Set(gatedPostPaths.map((path) => path.replace(/\/+$/, '')));
+  return dropSitemapEntries(xml, host, (path) => gated.has(path.replace(/\/+$/, '')));
+}
+
+function dropSitemapEntries(xml: string, host: string, shouldDrop: (path: string) => boolean): string {
   const origin = xmlEscape(`https://${host}`);
   return xml.replace(
     / {2}<url>\n {4}<loc>([^<]*)<\/loc>(?:\n {4}<lastmod>[^<]*<\/lastmod>)?\n {2}<\/url>\n/g,
@@ -90,22 +105,29 @@ export function removeGatedSitemapEntries(xml: string, host: string, gatedPaths:
         .replace(/&gt;/g, '>')
         .replace(/&lt;/g, '<')
         .replace(/&amp;/g, '&');
-      return matchGatedPath(gatedPaths, path || '/') === null ? block : '';
+      return shouldDrop(path || '/') ? '' : block;
     }
   );
 }
 
 /**
- * The sitemap without members-only pages. The access rows are read fresh on every
- * request and the filtered result is never cached, so an access change shows at once
- * even while the unfiltered sitemap is still in Redis.
+ * The sitemap without members-only pages and without members-only posts. The access
+ * rows are read fresh on every request and the filtered result is never cached, so an
+ * access change shows at once even while an older sitemap is still in Redis.
+ *
+ * Members-only posts are left out twice: when the sitemap is built (so the shared
+ * `sitemap:` cache never holds one), and again here on the way out (so a sitemap
+ * cached before a post became members-only cannot show it).
  */
 export async function buildSitemapXml(project: Project): Promise<string> {
-  const xml = await buildUnfilteredSitemapXml(project);
-  return removeGatedSitemapEntries(xml, primaryPublicHost(project), await listGatedPaths(project));
+  const gatedPosts = await listGatedPosts(project);
+  const host = primaryPublicHost(project);
+  const xml = await buildCachedSitemapXml(project, gatedPosts.map((post) => post.postId));
+  const withoutGatedPosts = removeGatedPostSitemapEntries(xml, host, gatedPosts.map(gatedPostPath));
+  return removeGatedSitemapEntries(withoutGatedPosts, host, await listGatedPaths(project));
 }
 
-async function buildUnfilteredSitemapXml(project: Project): Promise<string> {
+async function buildCachedSitemapXml(project: Project, gatedPostIds: readonly string[]): Promise<string> {
   const redis = getRedis();
   const cacheKey = `sitemap:${project.id}`;
 
@@ -125,12 +147,14 @@ async function buildUnfilteredSitemapXml(project: Project): Promise<string> {
     .where({ project_id: project.id, status: 'published' })
     .select('path', 'updated_at', 'seo_data');
 
-  const posts: Array<{ slug: string; type_slug: string; updated_at: Date | string | null; seo_data: unknown }> =
+  const publishedPosts: Array<{ id: string; slug: string; type_slug: string; updated_at: Date | string | null; seo_data: unknown }> =
     await db('website_builder.posts as p')
       .join('website_builder.post_types as pt', 'p.post_type_id', 'pt.id')
       .where('p.project_id', project.id)
       .where('p.status', 'published')
-      .select('p.slug', 'pt.slug as type_slug', 'p.updated_at', 'p.seo_data');
+      .select('p.id', 'p.slug', 'pt.slug as type_slug', 'p.updated_at', 'p.seo_data');
+  // Members-only posts never reach the shared cache.
+  const posts = excludeGatedPosts(publishedPosts, gatedPostIds);
 
   const seen = new Set<string>();
   const entries: Array<{ path: string; lastmod: string | null }> = [];

@@ -72,6 +72,20 @@ export interface MemberSession {
   groupIds: string[];
 }
 
+/** One members-only post of a site: its access row, its id and its address parts. */
+export interface GatedPost {
+  accessId: string;
+  postId: string;
+  typeSlug: string;
+  postSlug: string;
+}
+
+/** The access rule of one members-only post. No groups listed means every active member. */
+export interface MemberPostAccess {
+  postId: string;
+  groupIds: string[];
+}
+
 export type GateDecision = 'open' | 'not-found' | 'sign-in' | 'forbidden' | 'allow';
 
 // Page type discriminator
