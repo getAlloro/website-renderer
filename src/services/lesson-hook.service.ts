@@ -22,7 +22,7 @@
 
 // Must match SITE_COURSES_HOOK_ATTRIBUTE, SITE_COURSES_HOOKS.lesson and SITE_COURSES_POST_ID_ATTRIBUTE
 // in the app's config/siteCourses.ts.
-const HOOK_ATTRIBUTE = 'data-alloro-courses';
+export const HOOK_ATTRIBUTE = 'data-alloro-courses';
 const LESSON_HOOK = 'lesson';
 const POST_ID_ATTRIBUTE = 'data-post-id';
 

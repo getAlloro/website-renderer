@@ -30,6 +30,7 @@ import { resolveRedirect as resolveRedirectForProject } from '../services/redire
 import { resolveMemberGate, resolvePostGate, forceNoindex } from '../services/member-access.service';
 import { readMemberToken, buildSignInRedirect } from '../middleware/memberSession';
 import { ensureLessonHook, isCoursesEnabled, withLessonHook } from '../services/lesson-hook.service';
+import { withCoursesDefaultStyle } from '../utils/courses-default-style';
 import { renderPostBlockHtml } from '../utils/shortcodes';
 import { processTailwindCSS } from '../utils/tailwind';
 import { localizeVersionedImports } from '../utils/versionedImports';
@@ -703,7 +704,7 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
           lessonHook ? withLessonHook(singlePost.post) : singlePost.post,
           servingHost
         );
-        const html = lessonHook ? ensureLessonHook(rendered, singlePost.post.id) : rendered;
+        const html = lessonHook ? withCoursesDefaultStyle(ensureLessonHook(rendered, singlePost.post.id)) : rendered;
         if (readiness) {
           if (readiness !== await generationPostReadinessMarker(project, singlePost.postType.id, singlePost.post.id, pagePath)) throw new Error('GENERATION_READINESS_CHANGED_DURING_RENDER');
           res.set(GENERATION_READY_HEADER, readiness).set('Cache-Control', 'no-store');
@@ -730,7 +731,9 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
   }
 
   const readiness = await generationPublishedReadinessMarker(project, page);
-  const html = await assembleHtml(project, page, servingHost);
+  const assembled = await assembleHtml(project, page, servingHost);
+  // The member home and courses pages carry courses hooks: give them the default course style.
+  const html = isCoursesEnabled(project) ? withCoursesDefaultStyle(assembled) : assembled;
   if (readiness) {
     if (readiness !== await generationPublishedReadinessMarker(project, page)) throw new Error('GENERATION_READINESS_CHANGED_DURING_RENDER');
     res.set(GENERATION_READY_HEADER, readiness).set('Cache-Control', 'no-store');
