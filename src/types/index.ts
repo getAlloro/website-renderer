@@ -54,6 +54,8 @@ export interface Project {
   archived_at: Date | string | null;
   /** The per-site members switch. Absent until the app-side migration has run; absent means off. */
   members_enabled?: boolean | null;
+  /** The per-site courses switch (needs members on). Absent until the app-side migration has run; absent means off. */
+  courses_enabled?: boolean | null;
   created_at: Date;
   updated_at: Date;
 }

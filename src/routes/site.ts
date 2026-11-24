@@ -29,6 +29,7 @@ import { resolveShopBlocks } from '../services/shopblock.service';
 import { resolveRedirect as resolveRedirectForProject } from '../services/redirect.service';
 import { resolveMemberGate, resolvePostGate, forceNoindex } from '../services/member-access.service';
 import { readMemberToken, buildSignInRedirect } from '../middleware/memberSession';
+import { ensureLessonHook, isCoursesEnabled, withLessonHook } from '../services/lesson-hook.service';
 import { renderPostBlockHtml } from '../utils/shortcodes';
 import { processTailwindCSS } from '../utils/tailwind';
 import { localizeVersionedImports } from '../utils/versionedImports';
@@ -693,7 +694,16 @@ export async function siteRoute(req: Request, res: Response): Promise<void> {
         if (pathGate === 'handled') return;
         const gate = pathGate === 'allow' || postGate.outcome === 'allow' ? 'allow' : 'open';
         const readiness = await generationPostReadinessMarker(project, singlePost.postType.id, singlePost.post.id, pagePath);
-        const html = await assembleSinglePostHtml(project, singlePost.postType, singlePost.post, servingHost);
+        // The lesson hook (Mark as complete, attached files): only on a members-only post the post
+        // gate let this member open, on a site with courses on. That response is private and no-store.
+        const lessonHook = postGate.outcome === 'allow' && isCoursesEnabled(project);
+        const rendered = await assembleSinglePostHtml(
+          project,
+          singlePost.postType,
+          lessonHook ? withLessonHook(singlePost.post) : singlePost.post,
+          servingHost
+        );
+        const html = lessonHook ? ensureLessonHook(rendered, singlePost.post.id) : rendered;
         if (readiness) {
           if (readiness !== await generationPostReadinessMarker(project, singlePost.postType.id, singlePost.post.id, pagePath)) throw new Error('GENERATION_READINESS_CHANGED_DURING_RENDER');
           res.set(GENERATION_READY_HEADER, readiness).set('Cache-Control', 'no-store');

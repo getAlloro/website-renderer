@@ -687,3 +687,59 @@ test('?nocache=1 clears the post feed, post counts and menu auto-fill lists alon
   for (const key of keys) assert.equal(deleted.includes(key), true, `${key} is cleared`);
   assert.equal(store.get('unrelated:key'), 'stays');
 });
+
+// ---------------------------------------------------------------------------
+// The lesson hook on an allowed members-only post (plans/11192026-site-courses-library, T6)
+// ---------------------------------------------------------------------------
+
+const lessonHook = require('../dist/services/lesson-hook.service');
+const HOOK = (postId) => `<div data-alloro-courses="lesson" data-post-id="${postId}"></div>`;
+const countOf = (text, needle) => text.split(needle).length - 1;
+
+test('lesson hook: an allowed member on a site with courses on gets one hook, at the end of the post body', async () => {
+  tables.projects[0].courses_enabled = true;
+  tables.site_member_sessions = [{ member_id: 'm1', group_id: 'g-adc' }];
+  const res = await get('/lessons/secret-one', MEMBER);
+  assert.equal(res.status, 200);
+  assert.equal(countOf(res.text, HOOK('p-gated-1')), 1);
+  assert.equal(res.text.indexOf(HOOK('p-gated-1')) > res.text.indexOf('GATED_ONE_BODY'), true, 'after the post content');
+  assert.equal(res.headers['cache-control'], 'private, no-store');
+  assert.deepEqual(keysOf('set', 'sp:'), [], 'the page with the hook is never cached');
+  assert.match(res.text, /alloro-members-v1\.js|<\/body>/, 'the page is served in the site wrapper, which carries the members script while members are on');
+});
+
+test('lesson hook: never with courses off, never on a public post, never for a signed-out visitor', async () => {
+  tables.site_member_sessions = [{ member_id: 'm1', group_id: 'g-adc' }];
+  const coursesOff = await get('/lessons/secret-one', MEMBER);
+  assert.equal(coursesOff.status, 200);
+  assert.equal(coursesOff.text.includes('data-alloro-courses'), false, 'courses off');
+
+  tables.projects[0].courses_enabled = true;
+  const publicPost = await get('/lessons/welcome', MEMBER);
+  assert.equal(publicPost.status, 200);
+  assert.equal(publicPost.text.includes('data-alloro-courses'), false, 'a public post, even for a member');
+
+  tables.site_member_sessions = [];
+  const signedOut = await get('/lessons/secret-one');
+  assert.equal(signedOut.status, 302);
+  assert.equal(signedOut.text.includes('data-alloro-courses'), false, 'signed out');
+});
+
+test('lesson hook: courses on but members off is not "on"', () => {
+  assert.equal(lessonHook.isCoursesEnabled({ members_enabled: true, courses_enabled: true }), true);
+  assert.equal(lessonHook.isCoursesEnabled({ members_enabled: false, courses_enabled: true }), false);
+  assert.equal(lessonHook.isCoursesEnabled({ members_enabled: true }), false);
+});
+
+test('lesson hook, pure: a template that never prints the content still gets it once, before </main> or </body>', () => {
+  const hook = HOOK('p1');
+  assert.equal(lessonHook.ensureLessonHook(`<main>a</main><main>b</main>`, 'p1'), `<main>a</main><main>b${hook}</main>`);
+  assert.equal(lessonHook.ensureLessonHook(`<body>x</BODY>`, 'p1'), `<body>x${hook}</BODY>`);
+  assert.equal(lessonHook.ensureLessonHook('plain', 'p1'), `plain${hook}`);
+  const already = `<p>body</p>${hook}</main>`;
+  assert.equal(lessonHook.ensureLessonHook(already, 'p1'), already, 'unchanged when the content already carried it');
+  assert.equal(lessonHook.lessonHookHtml('a"b<c'), '<div data-alloro-courses="lesson" data-post-id="a&quot;b&lt;c"></div>');
+  const original = { id: 'p1', content: '<p>x</p>' };
+  assert.equal(lessonHook.withLessonHook(original).content, `<p>x</p>${hook}`);
+  assert.equal(original.content, '<p>x</p>', 'the post itself is not changed');
+});
