@@ -12,6 +12,7 @@ import { extractSubdomain } from './middleware/subdomain';
 import { securityHeaders } from './middleware/securityHeaders';
 import { responseCompression } from './middleware/responseCompression';
 import { importsRouter } from './routes/imports';
+import { membersRouter } from './routes/members';
 import { getDb } from './lib/db';
 import { closeRedis } from './lib/redis';
 import { wrapInLayout } from './templates/layout';
@@ -45,6 +46,11 @@ if (localRuntime) app.get('/__worktree/generation/:projectId/:runId', worktreeGe
 
 // Extract subdomain, then render site
 app.use(extractSubdomain);
+
+// Site member sign-in (/_members/*): needs the site host resolved above, and must sit
+// before the catch-all so it is never rendered as a page.
+app.use(membersRouter);
+
 app.get('*', siteRoute);
 
 // Global error handler — catches DB connection errors, etc.

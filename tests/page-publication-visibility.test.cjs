@@ -110,6 +110,8 @@ beforeEach(() => {
   rows.header_footer_code = [];
   rows.website_integrations = [];
   rows.redirects = [];
+  // The members-only gate asks once per site whether any path is gated; these sites have none.
+  rows.site_page_access = [];
   artifactReads.length = 0;
 });
 

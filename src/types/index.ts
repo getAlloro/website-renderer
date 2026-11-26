@@ -52,9 +52,27 @@ export interface Project {
   /** Each post type's picked page layout, e.g. { "articles": "editorial" }; missing = Default. */
   single_layouts?: Record<string, unknown> | string | null;
   archived_at: Date | string | null;
+  /** The per-site members switch. Absent until the app-side migration has run; absent means off. */
+  members_enabled?: boolean | null;
   created_at: Date;
   updated_at: Date;
 }
+
+// Members-only pages (site members). The renderer only reads these.
+
+/** The access rule covering a request path. No groups listed means every active member. */
+export interface MemberPageAccess {
+  gatedPath: string;
+  groupIds: string[];
+}
+
+/** A signed-in, active member of one site and the groups they are in. */
+export interface MemberSession {
+  memberId: string;
+  groupIds: string[];
+}
+
+export type GateDecision = 'open' | 'not-found' | 'sign-in' | 'forbidden' | 'allow';
 
 // Page type discriminator
 export type PageType = 'sections' | 'artifact';
