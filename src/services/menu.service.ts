@@ -13,6 +13,7 @@ import { getDb } from '../lib/db';
 import { getRedis } from '../lib/redis';
 import { parseMenuShortcodes, hasMenuShortcodes, escapeHtml } from '../utils/shortcodes';
 import { expandAutofillItems } from './menu-autofill.service';
+import { toPostGateSite, type PostGateSite } from './member-access.service';
 
 const MENU_TTL = 300; // 5 minutes
 
@@ -229,12 +230,16 @@ async function fetchMenuTemplate(templateId: string, slug: string): Promise<Menu
  */
 export async function resolveMenus(
   html: string,
-  projectId: string,
+  siteOrProjectId: PostGateSite | string,
   templateId?: string
 ): Promise<string> {
   if (!hasMenuShortcodes(html)) {
     return html;
   }
+
+  // The project (it carries the members switch, for auto-filled post lists) or just its id.
+  const site = toPostGateSite(siteOrProjectId);
+  const projectId = site.id;
 
   const shortcodes = parseMenuShortcodes(html);
   if (shortcodes.length === 0) {
@@ -250,7 +255,7 @@ export async function resolveMenus(
     // placeholder, not the posts it resolves to. A doctor published a minute ago
     // therefore appears on the next render rather than waiting out a five-minute
     // menu window — which is the whole point of the feature.
-    const items = await expandAutofillItems(projectId, cachedItems);
+    const items = await expandAutofillItems(site, cachedItems);
 
     if (items.length === 0) {
       // No items or menu not found — render as nav with empty state

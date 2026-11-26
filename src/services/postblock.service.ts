@@ -17,6 +17,7 @@ import type { Section } from '../types';
 import crypto from 'crypto';
 import { emptyShortcodeState } from '../utils/empty-shortcode-state';
 import { ProjectPostBlockModel } from '../models/ProjectPostBlockModel';
+import { listGatedPostIds, postGateCacheTag, toPostGateSite, type PostGateSite } from './member-access.service';
 
 const POST_BLOCK_TTL = 300; // 5 minutes
 const POSTS_TTL = 120; // 2 minutes
@@ -104,15 +105,19 @@ async function fetchPostBlock(templateId: string, slug: string): Promise<PostBlo
 
 /**
  * Fetch posts matching a shortcode's filters, with Redis caching.
+ *
+ * `gatedPostIds` are the site's members-only posts (member-access.service). They are left
+ * out in the query, before the shared cache is written, and the cache key names that set.
  */
 async function fetchPosts(
   projectId: string,
   postTypeSlug: string,
-  shortcode: PostBlockShortcode
+  shortcode: PostBlockShortcode,
+  gatedPostIds: readonly string[]
 ): Promise<PostRow[]> {
   const redis = getRedis();
   const filterHash = hashFilters(shortcode);
-  const cacheKey = `posts:${projectId}:${postTypeSlug}:${filterHash}`;
+  const cacheKey = `posts:${projectId}:${postTypeSlug}:${filterHash}${postGateCacheTag(gatedPostIds)}`;
 
   try {
     const cached = await redis.get(cacheKey);
@@ -144,6 +149,11 @@ async function fetchPosts(
       'posts.sort_order',
       'posts.custom_fields'
     );
+
+  // Members-only posts never appear in a public list
+  if (gatedPostIds.length > 0) {
+    query = query.whereNotIn('posts.id', [...gatedPostIds]);
+  }
 
   // Filter by specific post slugs (inclusion)
   if (shortcode.ids.length > 0) {
@@ -245,11 +255,12 @@ async function fetchPosts(
 async function fetchPostCount(
   projectId: string,
   postTypeSlug: string,
-  shortcode: PostBlockShortcode
+  shortcode: PostBlockShortcode,
+  gatedPostIds: readonly string[]
 ): Promise<number> {
   const redis = getRedis();
   const filterHash = hashFilters(shortcode);
-  const cacheKey = `posts-count:${projectId}:${postTypeSlug}:${filterHash}`;
+  const cacheKey = `posts-count:${projectId}:${postTypeSlug}:${filterHash}${postGateCacheTag(gatedPostIds)}`;
 
   try {
     const cached = await redis.get(cacheKey);
@@ -268,6 +279,10 @@ async function fetchPostCount(
       'post_types.slug': postTypeSlug,
     })
     .count('* as total');
+
+  if (gatedPostIds.length > 0) {
+    query = query.whereNotIn('posts.id', [...gatedPostIds]);
+  }
 
   if (shortcode.ids.length > 0) {
     query = query.whereIn('posts.slug', shortcode.ids);
@@ -314,11 +329,15 @@ async function fetchPostCount(
  * Returns the HTML with shortcodes replaced by rendered post block content.
  *
  * If no shortcodes exist, returns the HTML unchanged (fast path).
+ *
+ * `siteOrProjectId` is the project (it carries the members switch) or just its id. The
+ * post gate is asked once per page: members-only posts are left out of every list
+ * here, for signed-in members too.
  */
 export async function resolvePostBlocks(
   html: string,
   templateId: string | null,
-  projectId: string
+  siteOrProjectId: PostGateSite | string
 ): Promise<string> {
   if (!templateId || !hasPostBlockShortcodes(html)) {
     return html;
@@ -328,6 +347,10 @@ export async function resolvePostBlocks(
   if (shortcodes.length === 0) {
     return html;
   }
+
+  const site = toPostGateSite(siteOrProjectId);
+  const projectId = site.id;
+  const gatedPostIds = await listGatedPostIds(site);
 
   // Batch-fetch all unique post blocks
   const uniqueBlockSlugs = [...new Set(shortcodes.map((s) => s.id))];
@@ -363,7 +386,7 @@ export async function resolvePostBlocks(
       : shortcode;
 
     // Fetch posts matching this shortcode's filters
-    const posts = await fetchPosts(projectId, block.post_type_slug, effectiveShortcode);
+    const posts = await fetchPosts(projectId, block.post_type_slug, effectiveShortcode, gatedPostIds);
 
     if (posts.length === 0) {
       // Only opted-in sites show a provisional state; legacy shortcodes stay empty.
@@ -423,7 +446,7 @@ export async function resolvePostBlocks(
       hasPagination = true;
 
       // Calculate pagination metadata
-      const totalPosts = await fetchPostCount(projectId, block.post_type_slug, shortcode);
+      const totalPosts = await fetchPostCount(projectId, block.post_type_slug, shortcode, gatedPostIds);
       const perPage = shortcode.per_page;
       const totalPages = Math.ceil(totalPosts / perPage);
 

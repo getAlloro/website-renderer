@@ -54,6 +54,8 @@ export interface Project {
   archived_at: Date | string | null;
   /** The per-site members switch. Absent until the app-side migration has run; absent means off. */
   members_enabled?: boolean | null;
+  /** The per-site courses switch (needs members on). Absent until the app-side migration has run; absent means off. */
+  courses_enabled?: boolean | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -69,6 +71,20 @@ export interface MemberPageAccess {
 /** A signed-in, active member of one site and the groups they are in. */
 export interface MemberSession {
   memberId: string;
+  groupIds: string[];
+}
+
+/** One members-only post of a site: its access row, its id and its address parts. */
+export interface GatedPost {
+  accessId: string;
+  postId: string;
+  typeSlug: string;
+  postSlug: string;
+}
+
+/** The access rule of one members-only post. No groups listed means every active member. */
+export interface MemberPostAccess {
+  postId: string;
   groupIds: string[];
 }
 

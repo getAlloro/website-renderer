@@ -427,7 +427,7 @@ test('gate: a member outside the listed group gets the 403 page', async () => {
   tables.site_member_sessions = [{ member_id: 'm1', group_id: 'g-member' }];
   const res = await request('GET', '/base-camp', { headers: MEMBER_COOKIE });
   assert.equal(res.status, 403);
-  assert.match(res.text, /This page is for a different members group\./);
+  assert.match(res.text, /This page is for another group\./);
   assert.equal(res.headers['cache-control'], 'no-store');
   assert.equal(res.text.includes('CONTENT_OF_'), false);
 

@@ -21,6 +21,7 @@ import {
   fetchReviews,
   getProjectReviewScope,
 } from '../services/review.service';
+import { listGatedPostIds, postGateCacheTag } from '../services/member-access.service';
 import type { Project } from '../types';
 
 const API_CACHE_TTL = 120; // 2 minutes
@@ -115,12 +116,17 @@ async function postsHandler(req: Request, res: Response): Promise<void> {
   const ids = parseCommaSeparated(req.query.ids);
   const excIds = parseCommaSeparated(req.query.exc_ids);
 
+  // Members-only posts never appear in this public feed, for signed-in members too.
+  // Read fresh, before the cache: the cache is shared by every visitor, and its key
+  // names the set of members-only posts, so an access change applies on the next request.
+  const gatedPostIds = await listGatedPostIds(project);
+
   // Cache check
   const redis = getRedis();
   const cacheKey = `api:posts:${project.id}:${postTypeSlug}:${hashParams([
     String(page), String(perPage), order, orderBy,
     cats.join(','), tags.join(','), ids.join(','), excIds.join(','),
-  ])}`;
+  ])}${postGateCacheTag(gatedPostIds)}`;
 
   try {
     const cached = await redis.get(cacheKey);
@@ -144,6 +150,9 @@ async function postsHandler(req: Request, res: Response): Promise<void> {
         'post_types.slug': postTypeSlug,
       });
 
+    if (gatedPostIds.length > 0) {
+      query = query.whereNotIn('posts.id', gatedPostIds);
+    }
     if (ids.length > 0) {
       query = query.whereIn('posts.slug', ids);
     }
